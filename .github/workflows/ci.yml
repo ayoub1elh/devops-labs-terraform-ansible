@@ -1,0 +1,53 @@
+# CI for lab-04-state-backends.
+#
+# This lab is about state backends, so CI intentionally does NOT run
+# plan/apply (that would need Terraform Cloud credentials and would write
+# state). It only verifies code quality: terraform fmt + terraform validate.
+#
+# validate runs after `terraform init -backend=false`, which skips backend
+# configuration entirely — so the workflow passes even while backend.tf
+# still contains the placeholder organization "your-org".
+
+name: lab-04-state-backends-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "staging/lab-04-state-backends/**"
+      - ".github/workflows/lab-04-ci.yml"
+  pull_request:
+    paths:
+      - "staging/lab-04-state-backends/**"
+
+# Minimal permissions: read repo contents, write nothing.
+permissions:
+  contents: read
+
+jobs:
+  terraform-quality:
+    name: Terraform fmt and validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: staging/lab-04-state-backends
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+
+      - name: Terraform fmt (check only)
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init without backend
+        # -backend=false means no Terraform Cloud token is required and no
+        # remote state is touched; it only downloads providers for validate.
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform validate
