@@ -1,128 +1,270 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 06 — Terraform Workspaces (Dev + Staging from One Codebase)
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+This lab takes the exact AWS stack built in Lab 05 (VPC, public subnet,
+internet gateway, route table, security group allowing SSH + HTTP, an SSH key
+pair, and a `t2.micro` EC2 instance running Nginx via `user_data`) and makes
+it **multi-environment with Terraform workspaces**. Instead of copying the
+configuration into `dev/` and `staging/` folders, a single map of locals keyed
+by `terraform.workspace` decides the instance settings and tags, and every
+resource name embeds the workspace — so one `terraform apply` in the `dev`
+workspace and another in the `staging` workspace produce two completely
+isolated environments from the same code.
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+## Learning Objectives
 
-## How to Use This Repository
+- Explain what a Terraform workspace is and how per-workspace state files work.
+- Create and switch between workspaces with `terraform workspace new/select/list`.
+- Drive configuration differences (instance type, tags) through a
+  `terraform.workspace`-keyed map in `locals`.
+- Name resources with `${terraform.workspace}` so environments never collide.
+- Use the local backend and understand how to migrate to a remote (S3) backend later.
+- Verify isolation by comparing outputs, tags, and HTTP responses per workspace.
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
-
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
-flowchart LR
-    subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+graph TD
+    subgraph "Single Terraform configuration (this lab)"
+        WS1[Workspace: dev<br/>terraform.tfstate.d/dev/]
+        WS2[Workspace: staging<br/>terraform.tfstate.d/staging/]
+        CODE[main.tf + locals<br/>workspace map:<br/>instance type + environment tag]
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
+
+    WS1 --> CODE
+    WS2 --> CODE
+    CODE --> AWS
+
+    subgraph "AWS account / region (free tier)"
+        direction TB
+        VPC1[VPC lab-06-dev-vpc<br/>10.0.0.0/16]
+        SUB1[Public Subnet]
+        IGW1[Internet Gateway]
+        RT1[Route Table]
+        SG1[Security Group<br/>SSH + HTTP]
+        EC1[EC2 t2.micro<br/>Nginx, tags: Environment=dev]
+        VPC2[VPC lab-06-staging-vpc<br/>10.0.0.0/16]
+        SUB2[Public Subnet]
+        IGW2[Internet Gateway]
+        RT2[Route Table]
+        SG2[Security Group<br/>SSH + HTTP]
+        EC2[EC2 t2.micro<br/>Nginx, tags: Environment=staging]
     end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
-    end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+
+    VPC1 --> SUB1 --> IGW1
+    SUB1 --> RT1
+    SUB1 --> EC1
+    EC1 --> SG1
+    VPC2 --> SUB2 --> IGW2
+    SUB2 --> RT2
+    SUB2 --> EC2
+    EC2 --> SG2
 ```
+
+Both VPCs can use the same CIDR (`10.0.0.0/16`) because they are separate
+VPCs — workspaces isolate the *state*, and the workspace-prefixed names
+isolate the *resources*.
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+| Tool / Account | Version | Notes |
+| --- | --- | --- |
+| Terraform | >= 1.5.0 (`terraform version`) | Workspaces are a built-in, free feature |
+| AWS CLI | >= 2.x (`aws --version`) | Optional but recommended |
+| AWS account | Free tier | With programmatic access enabled |
+| SSH key pair | any | Generate with `ssh-keygen -t ed25519` if you don't have one |
 
-## Cost Warning
+Environment variables that must be set (never hardcode them in files):
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+```bash
+export AWS_ACCESS_KEY_ID="AKIA..."        # your IAM user access key
+export AWS_SECRET_ACCESS_KEY="..."        # your IAM user secret key
+export AWS_DEFAULT_REGION="us-east-1"     # optional; defaults to us-east-1
+export TF_VAR_ssh_public_key="ssh-ed25519 AAAA..."   # your PUBLIC key, one line
+```
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+The IAM user needs permissions to manage VPC, EC2, and key pairs
+(`AmazonEC2FullAccess` + `AmazonVPCFullAccess` is simplest for a lab; use a
+least-privilege policy in real life).
 
-## Contributing
+## Step-by-Step Instructions
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+1. **Check your tools:**
 
-## License
+   ```bash
+   terraform version    # >= 1.5.0
+   aws sts get-caller-identity   # confirms your credentials work
+   ```
 
-MIT — use it, fork it, teach with it.
+   Expected output: a version string, then an ARN/account JSON block.
+
+2. **Set the environment variables** listed in Prerequisites (all four).
+
+3. **Initialize Terraform:**
+
+   ```bash
+   terraform init
+   ```
+
+   Expected output ending with: `Terraform has been successfully initialized!`
+
+4. **Create the two workspaces:**
+
+   ```bash
+   terraform workspace new dev
+   terraform workspace new staging
+   ```
+
+   Expected output:
+
+   ```
+   Created and switched to workspace "dev"!
+   ...
+   Created and switched to workspace "staging"!
+   ```
+
+5. **List workspaces and switch to dev:**
+
+   ```bash
+   terraform workspace list
+   terraform workspace select dev
+   ```
+
+   Expected output:
+
+   ```
+   default
+   * dev
+     staging
+   Switched to workspace "dev".
+   ```
+
+6. **Deploy the dev environment:**
+
+   ```bash
+   terraform plan -out=tfplan-dev
+   terraform apply tfplan-dev
+   ```
+
+   Expected: `Apply complete! Resources: 8 added, 0 changed, 0 destroyed.`
+   plus outputs like `instance_public_ip = "54.x.x.x"` and
+   `environment = "dev"`.
+
+7. **Deploy the staging environment — same code, one command different:**
+
+   ```bash
+   terraform workspace select staging
+   terraform plan -out=tfplan-staging
+   terraform apply tfplan-staging
+   ```
+
+   Expected: another `Apply complete!`, but this time the outputs show
+   `environment = "staging"` and a **different** public IP. In the AWS console
+   you will now see `lab-06-dev-vpc` and `lab-06-staging-vpc`,
+   `lab-06-dev-web` and `lab-06-staging-web`, etc.
+
+8. **Inspect the per-workspace state files** (proof of isolation):
+
+   ```bash
+   ls terraform.tfstate.d/dev/ terraform.tfstate.d/staging/
+   ```
+
+   Expected: each directory contains its own `terraform.tfstate`.
+
+## How Do I Know This Worked?
+
+- **Different IPs per workspace** — after each apply, run
+  `terraform output instance_public_ip`. The dev and staging values must differ:
+
+  ```bash
+  terraform workspace select dev     && terraform output instance_public_ip
+  terraform workspace select staging && terraform output instance_public_ip
+  ```
+
+- **Nginx page echoes the workspace:**
+
+  ```bash
+  terraform workspace select dev
+  curl http://$(terraform output -raw instance_public_ip)
+  # <p>Workspace: dev</p>
+
+  terraform workspace select staging
+  curl http://$(terraform output -raw instance_public_ip)
+  # <p>Workspace: staging</p>
+  ```
+
+- **Tags differ in the AWS console / CLI:**
+
+  ```bash
+  terraform workspace select dev
+  aws ec2 describe-instances \
+    --instance-ids $(terraform output -raw instance_id) \
+    --query 'Reservations[].Instances[].Tags'
+  # includes {"Key": "Environment", "Value": "dev"} and {"Key": "Name", "Value": "lab-06-dev-web"}
+  ```
+
+- **Destroying one workspace leaves the other running:** apply both, then run
+  the Cleanup steps for `staging` only; `curl` the dev IP and it still serves.
+
+## Cleanup
+
+Destroy **each** workspace separately — destroying one does not touch the other:
+
+```bash
+terraform workspace select staging
+terraform destroy          # type 'yes' when prompted
+
+terraform workspace select dev
+terraform destroy          # type 'yes' when prompted
+
+# Optional: remove the workspaces themselves and all local state
+terraform workspace select default
+terraform workspace delete dev
+terraform workspace delete staging
+rm -rf .terraform terraform.tfstate.d
+```
+
+Or with the Makefile: `make destroy` then `make destroy WORKSPACE=staging`,
+then `make clean`.
+
+## Troubleshooting
+
+1. **Error: `No valid credential sources found` (on plan/apply)**
+   - *Symptom:* `terraform plan` fails immediately with an authentication error.
+   - *Cause:* `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` are unset, expired, or typo'd.
+   - *Fix:* Re-export the variables from Prerequisites and confirm with
+     `aws sts get-caller-identity` before retrying.
+
+2. **Error: `Workspace "staging" doesn't exist` (on `terraform workspace select staging`)**
+   - *Symptom:* select fails even though you "created" the workspace earlier.
+   - *Cause:* Workspaces live in the local backend directory
+       (`terraform.tfstate.d/`) of the machine you ran `init` on — a fresh
+       clone or `make clean` wipes them, or you created it in a different directory.
+     - *Fix:* Recreate it: `terraform workspace new staging`, then re-apply.
+
+3. **Error: `Error creating KeyPair: InvalidKeyPair.Duplicate` (or similar `AlreadyExists` on apply)**
+   - *Symptom:* apply fails creating `lab-06-<workspace>-key`.
+   - *Cause:* You applied in the `default` workspace too — `default` gets
+     dev-like settings from the `lookup()` fallback, so its names collide with
+     the real `dev` workspace.
+   - *Fix:* Only use named workspaces: run
+     `terraform workspace select dev && terraform destroy` while in the
+     `default` workspace to remove the colliding resources, then switch to
+     `dev` and re-apply.
+
+## Free Tier Notes
+
+- `t2.micro` is free-tier eligible (750 hours/month) in all regions;
+  `t3.micro` is only free-tier in some regions, which is why both workspaces
+  here stick to `t2.micro`. You will have **two instances running** (dev +
+  staging) — their combined usage counts against the same 750-hour monthly
+  allowance, so stop or destroy them when not experimenting.
+- The VPC, subnet, internet gateway, and route table are free. Each instance
+  creates an 8 GiB EBS root volume (30 GiB/month of general-purpose SSD is
+  free).
+- Public IPs assigned to running instances are free; **Elastic IPs left
+  unattached cost money** — this lab does not create any.
+- Free tiers change over time: always run the Cleanup section and check the
+  AWS Billing console after finishing the lab.
+- Terraform workspaces and the local backend are free Terraform CLI features.
+  If you later migrate state to S3, the S3 bucket itself is outside the AWS
+  free tier (negligible cost for a lab, but not zero).
