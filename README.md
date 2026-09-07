@@ -1,128 +1,192 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 15: Ansible Vault — Encrypting Secrets in Your Repo
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+Ansible Vault encrypts YAML files containing secrets (passwords, API keys) with AES256, so they can live safely in Git while CI and runs decrypt them on the fly. This lab creates a vault-encrypted `group_vars` file, references its secrets indirectly from a cleartext vars file, runs a playbook that uses a vaulted password, and wires everything up so GitHub Actions can decrypt in CI using a GitHub Secret — all on `localhost`, entirely free.
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+## Learning Objectives
 
-## How to Use This Repository
+- Create and edit vault-encrypted files with `ansible-vault create`, `edit`, `view`, `encrypt`, and `decrypt`.
+- Reference vault variables indirectly (`db_password: "{{ vault_db_password }}"`) so cleartext files never hold secrets.
+- Run playbooks with `--ask-vault-pass` (interactive) vs `--vault-password-file` (scripts, Make, CI).
+- Rotate a vault password with `ansible-vault rekey`.
+- Pass the vault password to GitHub Actions via the `ANSIBLE_VAULT_PASSWORD` secret without ever echoing it.
+- Apply secret hygiene: `no_log: true` on any task that touches a secret, and `mode: 0600` on files that contain one.
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
-
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+    subgraph Local["Your machine"]
+        A["Learner / operator"] -->|ansible-vault create/edit/rekey| V["vault.yml<br/>AES256-encrypted<br/>committed to git"]
+        A -->|make deploy| P["ansible-playbook site.yml<br/>--vault-password-file vault_password"]
+        VP["vault_password<br/>(local only, gitignored)"] -->|decrypts| V
+        V -->|vault_db_password| P
+        C["vars.yml<br/>db_password = vault ref"] --> P
+        P --> F["/tmp/lab15-app.conf<br/>mode 0600"]
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
+    subgraph GitHub["GitHub Actions (ubuntu-latest)"]
+        S["Secret:<br/>ANSIBLE_VAULT_PASSWORD"] -->|written to temp file<br/>chmod 600, never echoed| T["ansible-playbook<br/>syntax-check + run"]
+        R["Repo: encrypted vault.yml"] --> T
     end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
-    end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+    V -->|pushed| R
+    S -.->|same password| VP
 ```
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+- **Git Bash** (Windows) or any POSIX shell — all commands below are copy-paste ready.
+- **Ansible >= 2.14** (`ansible --version`). Install with `pip install ansible` or your OS package manager.
+- **GNU Make** (optional but recommended — it drives the whole lab).
+- **A free GitHub account** with a repo where you can push this lab and configure Actions.
+- Required local file: `vault_password` containing your vault password (created by `make setup`).
 
-## Cost Warning
+> The example vault password used throughout is `devops-labs`. Use it locally for convenience, but treat any real password as sensitive and **never commit it**.
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+## Step-by-Step Instructions
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+### 1. Set up the local vault password file
 
-## Contributing
+```bash
+make setup
+```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+Expected output:
 
-## License
+```
+Creating local vault_password from vault_password.example ...
+Done. Password file: vault_password
+```
 
-MIT — use it, fork it, teach with it.
+This copies `vault_password.example` (containing `devops-labs`) to `vault_password` and locks it to `chmod 600`. The real `vault_password` is gitignored.
+
+### 2. Create the real encrypted vault file
+
+The placeholder `ansible/group_vars/all/vault.yml` in this lab only documents the format. Replace it with a genuinely encrypted file:
+
+```bash
+ansible-vault create ansible/group_vars/all/vault.yml
+```
+
+Enter the password `devops-labs` (must match `vault_password`), then type the YAML content:
+
+```yaml
+vault_db_password: "s3cure-lab-password-123"
+```
+
+Save and exit. Verify the file now starts with the vault header:
+
+```bash
+head -1 ansible/group_vars/all/vault.yml
+# $ANSIBLE_VAULT;1.1;AES256
+```
+
+### 3. Inspect and edit secrets
+
+```bash
+# View decrypted content (stdout only, file stays encrypted)
+ansible-vault view ansible/group_vars/all/vault.yml --vault-password-file vault_password
+
+# Edit in your $EDITOR — re-encrypts on save
+ansible-vault edit ansible/group_vars/all/vault.yml --vault-password-file vault_password
+```
+
+### 4. Run the playbook (two ways)
+
+Interactive password prompt:
+
+```bash
+ansible-playbook ansible/site.yml --ask-vault-pass
+```
+
+Password file (the Make/CI-friendly way):
+
+```bash
+ansible-playbook ansible/site.yml --vault-password-file vault_password
+# or simply:
+make deploy
+```
+
+Expected output (note the `no_log` suppression of the secret-bearing tasks):
+
+```
+TASK [Demonstrate Ansible Vault secret handling on localhost] ***
+TASK [Show the decrypted database password (hidden via no_log)] ***
+ok: [localhost] => {"censored": "the output has been hidden due to no_log", "changed": false}
+TASK [Write fake app config containing the secret (mode 0600)] ***
+changed: [localhost] => {"censored": "the output has been hidden due to no_log", "changed": true}
+TASK [Report config file metadata (no secret content)] ***
+ok: [localhost] => {
+    "msg": "Config at /tmp/lab15-app.conf exists=True, mode=600"
+}
+```
+
+### 5. Encrypt/decrypt existing files (the general workflow)
+
+```bash
+# Encrypt a cleartext file in place
+ansible-vault encrypt some-secrets.yml --vault-password-file vault_password
+
+# Decrypt back to cleartext (rarely needed — prefer `view`)
+ansible-vault decrypt some-secrets.yml --vault-password-file vault_password
+```
+
+### 6. Rotate the vault password (`rekey`)
+
+```bash
+ansible-vault rekey ansible/group_vars/all/vault.yml
+# New vault password: <type old password, then the new one>
+```
+
+Then update `vault_password` locally **and** the `ANSIBLE_VAULT_PASSWORD` GitHub Secret (Repo → Settings → Secrets and variables → Actions) so CI keeps working.
+
+### 7. Configure CI
+
+In your GitHub repo, add the secret: **Settings → Secrets and variables → Actions → New repository secret**, name `ANSIBLE_VAULT_PASSWORD`, value `devops-labs` (the password you used in step 2). The workflow `.github/workflows/ansible-vault.yml` writes it to a temp file with `chmod 600`, passes it via `--vault-password-file`, and never echoes it — then runs `--syntax-check` followed by a real run.
+
+## How Do I Know This Worked?
+
+```bash
+# 1. The vault file is really encrypted (not the placeholder)
+head -1 ansible/group_vars/all/vault.yml
+# -> $ANSIBLE_VAULT;1.1;AES256
+
+# 2. Running without a vault password FAILS loudly (proves the secret is protected)
+ansible-playbook ansible/site.yml
+# -> ERROR! Attempting to decrypt but no vault secrets found
+
+# 3. The config file exists with owner-only permissions and contains the secret
+ls -l /tmp/lab15-app.conf
+# -> -rw------- ... /tmp/lab15-app.conf
+cat /tmp/lab15-app.conf
+# -> db_password=s3cure-lab-password-123
+
+# 4. The playbook output contains the string "hidden due to no_log" and
+#    NEVER the password string in any task output.
+```
+
+In GitHub: push, open the Actions tab, and confirm the `ansible-vault` workflow run is green — with no secret visible in any step log.
+
+## Cleanup
+
+```bash
+make clean        # removes /tmp/lab15-app.conf and the local vault_password
+```
+
+Nothing cloud-side is created, so there are no cloud resources to tear down. Optionally also delete the `ANSIBLE_VAULT_PASSWORD` GitHub Secret when you're done (Settings → Secrets and variables → Actions → ANSIBLE_VAULT_PASSWORD → Remove).
+
+## Troubleshooting
+
+1. **Symptom:** `ERROR! Attempting to decrypt but no vault secrets found` (or `Vault format unrecognised`).
+   **Cause:** You're running the playbook without providing a vault password, or `vault.yml` is still the placeholder (not a real `ansible-vault create` output).
+   **Fix:** Run `ansible-vault create ansible/group_vars/all/vault.yml` as in Step 2, then run the playbook with `--vault-password-file vault_password` or `--ask-vault-pass`.
+
+2. **Symptom:** CI fails at the syntax-check or run step with a decryption error.
+   **Cause:** The GitHub Secret `ANSIBLE_VAULT_PASSWORD` doesn't match the password used to encrypt the committed `vault.yml` (forgot to update it after `ansible-vault rekey`, or a stray newline in the secret).
+   **Fix:** Confirm the password locally with `ansible-vault view ansible/group_vars/all/vault.yml --vault-password-file vault_password`, then re-set the secret to exactly that value (no trailing newline) and re-run the workflow.
+
+3. **Symptom:** The playbook runs but the password appears in CI logs / terminal output.
+   **Cause:** A task that touches a secret is missing `no_log: true` (or uses `debug` on the raw vault variable without it).
+   **Fix:** Add `no_log: true` to every task that prints, diffs, or renders the secret, exactly as in `ansible/site.yml`; rotate the password with `ansible-vault rekey` since it was exposed.
+
+## Free Tier Notes
+
+This lab creates **no cloud resources** — everything runs on `localhost` and GitHub's free `ubuntu-latest` runners, so there is nothing to bill. GitHub Secrets and Actions minutes are free for public repositories. Free tiers change over time: always run `make clean`, review your repo's Actions settings, and check the GitHub billing page after finishing.
