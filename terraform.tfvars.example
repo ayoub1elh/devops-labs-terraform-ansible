@@ -1,0 +1,20 @@
+# -----------------------------------------------------------------------------
+# terraform.tfvars.example — Sample input values for Lab 02.
+#
+# Copy this file to terraform.tfvars and edit the values:
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# terraform.tfvars is ignored by git (see .gitignore), so your local
+# overrides never get committed. Every variable here is optional — anything
+# you omit falls back to the default in variables.tf.
+# -----------------------------------------------------------------------------
+
+# Which image to run. Change the tag to test re-deploying a new version.
+# image_name = "nginx:1.27-alpine"
+
+# Host port the container answers on. Pick a free port (e.g. 8080, 9090, 3000).
+# host_port = 8080
+
+# Prefix for the computed container name (locals.tf appends a random suffix).
+# container_name_prefix = "lab02-nginx"
