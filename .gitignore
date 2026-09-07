@@ -1,5 +1,4 @@
-# ─── Terraform ────────────────────────────────────────────────────────────────
-# Local .terraform directories and lock files (per-branch/module)
+# Terraform artifacts
 **/.terraform/*
 **/.terraform.lock.hcl
 *.tfstate
@@ -15,28 +14,27 @@ override.tf.json
 .terraformrc
 terraform.rc
 
-# ─── Ansible ──────────────────────────────────────────────────────────────────
-*.retry                # ansible-playbook retry files
-.vault_pass            # never commit vault passwords
+# Scanner outputs
+checkov_report*
+tfsec-results*
+
+# Ansible artifacts (kept so the lab composes with later Ansible labs)
+*.retry
+.vault_pass
 *.vault_pass
 ansible.log
 
-# ─── Molecule / tests ─────────────────────────────────────────────────────────
+# Molecule / Python test artifacts
 .molecule/
 .pytest_cache/
 __pycache__/
 *.pyc
-
-# ─── Python (molecule/ansible deps) ───────────────────────────────────────────
 .venv/
 venv/
 
-# ─── Editors / OS ─────────────────────────────────────────────────────────────
+# Editors / OS
 .vscode/
 .idea/
 *.swp
 .DS_Store
 Thumbs.db
-
-# ─── Build staging area (used by repo maintainers) ────────────────────────────
-staging/
