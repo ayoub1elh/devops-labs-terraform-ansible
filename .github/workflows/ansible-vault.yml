@@ -1,0 +1,92 @@
+---
+# =============================================================================
+# lab-15-ansible-vault — CI workflow
+#
+# Decrypts the committed vault-encrypted group_vars using the GitHub Secret
+# ANSIBLE_VAULT_PASSWORD, then syntax-checks and runs the demonstration
+# playbook. The password is written to a mode-0600 temp file, passed via
+# --vault-password-file, and NEVER echoed or exported into step logs.
+#
+# Prerequisite: the learner must have created ansible/group_vars/all/vault.yml
+# with `ansible-vault create` (or `encrypt`) using a password equal to the
+# ANSIBLE_VAULT_PASSWORD secret.
+# =============================================================================
+
+name: ansible-vault
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ansible/**"
+      - ".github/workflows/ansible-vault.yml"
+      - "Makefile"
+  pull_request:
+    paths:
+      - "ansible/**"
+      - ".github/workflows/ansible-vault.yml"
+  workflow_dispatch: {}
+
+# Least-privilege: the only thing this job needs is read access to repo
+# contents (to check out the encrypted vault file).
+permissions:
+  contents: read
+
+jobs:
+  vault-playbook:
+    name: Decrypt vault, syntax-check, and run playbook
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install "ansible>=9.0.0" ansible-lint
+
+      - name: Prepare vault password file (no echo, mode 600)
+        env:
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          VAULT_PASS_FILE="$(mktemp)"
+          # Write the secret to the temp file without ever printing it.
+          printf '%s\n' "${ANSIBLE_VAULT_PASSWORD}" > "${VAULT_PASS_FILE}"
+          chmod 600 "${VAULT_PASS_FILE}"
+          # Expose only the FILE PATH to later steps via GITHUB_ENV.
+          echo "VAULT_PASS_FILE=${VAULT_PASS_FILE}" >> "${GITHUB_ENV}"
+
+      - name: Lint playbook and group_vars
+        run: ansible-lint ansible/site.yml
+
+      - name: Syntax-check playbook (decrypts vault)
+        run: |
+          ansible-playbook ansible/site.yml \
+            --vault-password-file "${VAULT_PASS_FILE}" \
+            --syntax-check
+
+      - name: Run playbook on localhost
+        run: |
+          ansible-playbook ansible/site.yml \
+            --vault-password-file "${VAULT_PASS_FILE}"
+
+      - name: Verify config file permissions (no secret content)
+        run: |
+          stat -c '%a %n' /tmp/lab15-app.conf
+          test "$(stat -c '%a' /tmp/lab15-app.conf)" = "600"
+
+      - name: Scrub vault password file
+        if: always()
+        env:
+          VAULT_PASS_FILE: ${{ env.VAULT_PASS_FILE }}
+        run: |
+          if [ -n "${VAULT_PASS_FILE}" ] && [ -f "${VAULT_PASS_FILE}" ]; then
+            rm -f "${VAULT_PASS_FILE}"
+            echo "Vault password file removed."
+          fi
