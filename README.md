@@ -1,128 +1,270 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 14 — Dynamic Inventory with the `amazon.aws.aws_ec2` Plugin
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+So far, every Ansible run needed a **static inventory file** that listed your hosts by hand (or that Terraform generated for you). That breaks the moment instances come and go. In this lab, Terraform still builds the same free-tier EC2 instance as Lab 05, but Ansible discovers it **on the fly** using the `amazon.aws.aws_ec2` inventory plugin: the plugin calls the AWS API, filters for running instances tagged `Environment = dev`, and builds the host list at runtime. There is **no static inventory file anywhere in this lab**.
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+## Learning Objectives
 
-## How to Use This Repository
+- Explain what a dynamic inventory is and why static inventories don't scale.
+- Install the `amazon.aws` and `community.aws` collections with `ansible-galaxy`.
+- Configure the `amazon.aws.aws_ec2` inventory plugin: regions, filters, `hostnames`, `keyed_groups`, and `compose`.
+- Preview an inventory with `ansible-inventory --graph` and inspect host variables with `--list`.
+- Tag EC2 instances in Terraform so the plugin can select them with filters.
+- Understand inventory caching and the security trade-off of disabling SSH host-key checking.
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
-
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
 flowchart LR
     subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+        CFG[ansible.cfg<br/>enable_plugins]
+        INV[inventory/aws_ec2.yml<br/>plugin config:<br/>filters, hostnames, compose]
+        PB[site.yml<br/>Nginx + MOTD playbook]
+        TF[Terraform<br/>VPC + t2.micro EC2<br/>tag: Environment=dev]
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
+    subgraph AWS["AWS (Free Tier)"]
+        API[EC2 DescribeInstances API]
+        SG[Security Group<br/>22, 80]
+        EC2a[EC2 t2.micro<br/>tag: Environment=dev]
+        EC2b[EC2 t2.micro<br/>tag: Environment=dev]
     end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
-    end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+    TF -->|creates| EC2a
+    PB --> CFG
+    CFG --> INV
+    INV -->|boto3 credentials| API
+    API -->|returns matching instances| INV
+    INV -->|dynamic host list| PB
+    PB -->|SSH ubuntu@public-ip| EC2a
+    PB -->|SSH ubuntu@public-ip| EC2b
 ```
+
+Add a second instance tagged `Environment=dev` in the AWS console and the next `make deploy` configures it automatically — the playbook never changes.
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+**Tools (exact versions below are what the lab was tested with; nearby versions usually work):**
 
-## Cost Warning
+| Tool | Version | Check with |
+|------|---------|------------|
+| Terraform | >= 1.6.0 | `terraform version` |
+| ansible-core | >= 2.15 | `ansible --version` |
+| boto3 (Python) | >= 1.26 | `python3 -m pip show boto3` |
+| make | any GNU/BSD make | `make --version` |
+| SSH client + key pair | OpenSSH | `ssh -V` |
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+**Free accounts:**
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+- An AWS account with a valid **credit/debit card** (required to open an account, but this lab only uses free-tier resources).
+- An IAM user with the `AmazonEC2FullAccess` managed policy (or equivalent) for Terraform, plus the same credentials usable by boto3 for the inventory plugin.
 
-## Contributing
+**Environment variables** (set in your shell before every `make` target):
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+| Variable | Why |
+|----------|-----|
+| `AWS_ACCESS_KEY_ID` | Authenticates Terraform *and* the inventory plugin (via boto3). |
+| `AWS_SECRET_ACCESS_KEY` | Secret half of the above. Never commit it. |
+| `AWS_REGION` | Region for both Terraform and the plugin. Falls back to `AWS_DEFAULT_REGION`, then `us-east-1`. |
+| `ANSIBLE_SSH_PRIVATE_KEY_FILE` | Optional override for the private key path used by the plugin's `compose` block. Defaults to `~/.ssh/devops-labs.pem`. |
 
-## License
+Generate an SSH key pair first (Terraform uploads the public half to AWS):
 
-MIT — use it, fork it, teach with it.
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/devops-labs -N ""
+# The private key is ~/.ssh/devops-labs (no .pem). If yours has a .pem suffix,
+# set ANSIBLE_SSH_PRIVATE_KEY_FILE accordingly.
+```
+
+## Step-by-Step Instructions
+
+### 1. Set credentials
+
+```bash
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI..."
+export AWS_REGION="us-east-1"
+export ANSIBLE_HOST_KEY_CHECKING=False   # see the security note below
+```
+
+> **Security caveat for `ANSIBLE_HOST_KEY_CHECKING=False`:** this disables SSH's protection against man-in-the-middle attacks — anyone able to intercept your connection could impersonate the server. Acceptable for short-lived throwaway lab instances; on untrusted networks, prefer leaving host-key checking ON and answering `yes` when SSH asks, or pre-populate `~/.ssh/known_hosts`. `ansible.cfg` also sets `host_key_checking = False` with a warning comment, so the export above is belt-and-braces, not strictly required.
+
+### 2. Install the Ansible collections
+
+```bash
+make setup
+# or, manually:
+ansible-galaxy collection install -r ansible/requirements.yml
+```
+
+Expected output:
+
+```
+Starting galaxy collection install process
+Process install dependency map
+Starting collection install process
+Downloading https://galaxy.ansible.com/download/amazon-aws-8.x.x.tar.gz ...
+Installing 'amazon.aws:8.x.x' to '/home/you/.ansible/collections/ansible_collections/amazon/aws'
+...
+```
+
+This also requires `boto3`/`botocore`. If `pip` isn't on your PATH, use your OS package manager or a virtualenv:
+
+```bash
+python3 -m pip install boto3
+```
+
+### 3. Provision the infrastructure
+
+```bash
+cd terraform
+terraform init
+terraform apply
+cd ..
+```
+
+Confirm with `yes`. Terraform prints the instance's IP at the end. The instance carries the tags `Name = lab-14-web` and `Environment = dev` (from `var.environment`, default `"dev"`) — that second tag is what the plugin will filter on.
+
+### 4. Preview the dynamic inventory
+
+```bash
+make preview
+# or: cd ansible && ansible-inventory -i inventory/aws_ec2.yml --graph
+```
+
+Expected output (note there is **no static hosts file involved**):
+
+```
+@all:
+  |--@aws_ec2:
+  |  |--54.210.123.45
+  |--@env_dev:
+  |  |--54.210.123.45
+  |--@name_lab_14_web:
+  |  |--54.210.123.45
+  |--@ungrouped:
+```
+
+The `@env_dev` and `@name_lab_14_web` groups were built automatically by the `keyed_groups` from the instance's tags.
+
+To see the host variables the plugin composed (including `ansible_user` and `ansible_ssh_private_key_file`):
+
+```bash
+cd ansible && ansible-inventory -i inventory/aws_ec2.yml --list
+```
+
+Look for a block like:
+
+```json
+"54.210.123.45": {
+  "ansible_host": "54.210.123.45",
+  "ansible_ssh_private_key_file": "~/.ssh/devops-labs.pem",
+  "ansible_user": "ubuntu",
+  ...
+}
+```
+
+### 5. Deploy the playbook
+
+```bash
+make deploy
+```
+
+Expected output (abridged):
+
+```
+PLAY [Configure web servers discovered via the aws_ec2 dynamic inventory] ****
+
+TASK [Install Nginx] ***********************************************************
+changed: [54.210.123.45]
+
+TASK [Ensure Nginx is started and enabled] *************************************
+ok: [54.210.123.45]
+
+TASK [Deploy a custom index page] **********************************************
+changed: [54.210.123.45]
+
+RUNNING HANDLER [Reload nginx] *************************************************
+changed: [54.210.123.45]
+
+PLAY RECAP *********************************************************************
+54.210.123.45              : ok=5    changed=3    unreachable=0    failed=0
+```
+
+### 6. (Optional) Prove it's really dynamic
+
+In the AWS console, **launch a second `t2.micro`** with the same tags (`Environment = dev`, any `Name`). Wait for it to reach `running` state, then run `make preview` again — it appears instantly, no file edits. Run `make deploy` and Ansible configures both. Terminate it when done.
+
+### About inventory caching
+
+Every Ansible run calls the EC2 `DescribeInstances` API. On large accounts that's slow and can hit rate limits, so the plugin supports **caching** its API response:
+
+1. Uncomment the `cache:`, `cache_plugin:`, `cache_connection:`, `cache_timeout:` lines at the bottom of `ansible/inventory/aws_ec2.yml`.
+2. Configure the cache backend in `ansible/ansible.cfg` under `[defaults]`:
+
+   ```ini
+   fact_caching = ansible.builtin.jsonfile
+   fact_caching_connection = /tmp/ansible_inventory_cache
+   fact_caching_timeout = 300
+   ```
+
+3. Re-run `make preview` — the first run queries AWS and writes the cache; subsequent runs (within the timeout) read the local cache.
+
+**Gotcha:** with caching on, a brand-new instance may *not* appear until the cache expires or you flush it with `ansible-inventory -i inventory/aws_ec2.yml --flush-cache`. Leave caching off while learning; enable it when runs get slow.
+
+## How Do I Know This Worked?
+
+```bash
+# 1. The inventory is non-empty and grouped by tags
+make preview                          # you should see @env_dev with your instance IP
+
+# 2. Ansible can actually reach the hosts over SSH
+make ping                             # expect "pong" per host
+
+# 3. The playbook runs green
+make deploy                           # failed=0, unreachable=0
+
+# 4. Nginx serves the lab page (use the IP from make preview or terraform output)
+curl http://$(cd terraform && terraform output -raw instance_public_ip)
+```
+
+Success looks like the HTML page containing "Served by 54.210.123.45" and "discovered automatically by the amazon.aws.aws_ec2 inventory plugin". SSH in to see the MOTD:
+
+```bash
+ssh -i ~/.ssh/devops-labs ubuntu@<PUBLIC_IP>
+# banner: "This machine is managed by Ansible (Lab 14 - Dynamic Inventory)."
+```
+
+## Cleanup
+
+```bash
+make destroy        # terraform destroy — deletes the EC2 instance, VPC, SG, key pair
+```
+
+Then confirm **zero running instances** in the AWS EC2 console (Regions dropdown → check the region you used) and review **Billing → Bills** for the month. `make clean` removes only local artifacts (`.terraform/`, caches, retry files) — it never touches cloud resources.
+
+## Troubleshooting
+
+**1. `ansible-inventory` says `No inventory was parsed, only implicit localhost is available`, or the graph is empty.**
+
+- *Symptom:* `make preview` shows just `@all:` and `@ungrouped:` with no hosts.
+- *Cause:* Either the plugin isn't enabled, the region is wrong, or no instance matches the filters. The plugin is silently ignored if `enable_plugins` in `ansible.cfg` doesn't include `amazon.aws.aws_ec2`, and boto3 defaults to a different region than Terraform if `AWS_REGION` isn't exported.
+- *Fix:* Confirm `[inventory] enable_plugins = amazon.aws.aws_ec2, ...` in `ansible/ansible.cfg`. Confirm `echo $AWS_REGION` matches the region Terraform used (`cd terraform && terraform output` works only if the instance exists). Check the instance's tags in the EC2 console — it must be `running` and tagged exactly `Environment: dev`. Run the plugin verbosely to see the API calls: `ansible-inventory -i inventory/aws_ec2.yml --list -vvv`.
+
+**2. `The amazon.aws.aws_ec2 inventory plugin requires boto3 and botocore`.**
+
+- *Symptom:* inventory commands fail with an import error mentioning `botocore`.
+- *Cause:* The Python interpreter that runs Ansible doesn't have `boto3` installed (common when Ansible runs from a system package but `pip` installed boto3 into a user site or virtualenv).
+- *Fix:* Install it into the same Python Ansible uses: `python3 -m pip install boto3` then `python3 -c "import botocore; print(botocore.__version__)"` to verify. If you use a virtualenv for Ansible, activate it first.
+
+**3. `UNREACHABLE! ... Permission denied (publickey)` or SSH connection timeouts.**
+
+- *Symptom:* `make ping` or `make deploy` fails on every host with `Permission denied (publickey,...)`, or hangs on `ESTABLISH SSH CONNECTION`.
+- *Cause:* The private key path in the inventory's `compose` block doesn't match your machine, or the security group doesn't allow SSH from your IP. If you regenerated a key after `terraform apply`, the public key in AWS no longer matches your private key.
+- *Fix:* Point the plugin at the right key: `export ANSIBLE_SSH_PRIVATE_KEY_FILE=~/.ssh/your-key` and re-run. Check the security group allows TCP 22 from your address (`var.allowed_ssh_cidr` in `terraform/variables.tf`). If you changed keys, run `terraform apply` again to update the AWS key pair, or `make destroy && make deploy` after fixing `public_key_path`.
+
+## Free Tier Notes
+
+- This lab creates one `t2.micro` instance (750 hours/month free for 12 months from account creation), a VPC/subnet/IGW/route table (free), one security group (free), and one key pair (free). The `ubuntu` AMI and an 8 GiB root EBS volume fall within the 30 GiB-month free EBS allowance.
+- **Free tiers change.** AWS can modify or retire free-tier offerings at any time. Always:
+  1. Run `make destroy` when you are done — a forgotten running `t2.micro` costs ~$8/month once free hours run out.
+  2. Check **AWS Console → Billing → Bills** after the lab.
+  3. Delete the AMI snapshots/EBS volumes if any remain after destroy (EC2 console → Elastic Block Store → Volumes/Snapshots).
+- The inventory plugin itself only makes free `Describe*` API calls.
