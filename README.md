@@ -1,128 +1,240 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 17 — Full DevOps Pipeline: Terraform + Ansible + GitHub Actions (Capstone)
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+This is the capstone lab. It combines everything from the previous labs into one continuous, push-button pipeline: Terraform provisions a free-tier AWS environment (Lab 05), tags it `Environment=dev` (Lab 14), renders an Ansible inventory with a `local_file` resource (Lab 13), and a GitHub Actions workflow then wires three jobs together with `needs:` — Terraform apply, Ansible configuration via a **dynamic AWS inventory plugin**, and an HTTP smoke test — plus a manually gated `destroy` job for safe cleanup. Locally, a Makefile mirrors the exact same flow.
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+## Learning Objectives
 
-## How to Use This Repository
+- Chain GitHub Actions jobs with `needs:` so infrastructure exists before configuration, and configuration finishes before testing.
+- Authenticate to AWS from GitHub Actions using **OIDC** (short-lived tokens), never long-lived access keys.
+- Use the `amazon.aws.aws_ec2` **dynamic inventory plugin** instead of a static inventory file, filtering by Terraform tags.
+- Pass data between jobs: `terraform output` → job `outputs` → downstream jobs, plus a build **artifact**.
+- Gate a destructive job behind a GitHub **Environment with required reviewers**.
+- Mirror a CI pipeline locally with a Makefile (`all`, `deploy`, `smoke-test`, `destroy`).
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
-
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+    subgraph GitHub["GitHub (Actions + Secrets)"]
+        WF["full-pipeline.yml"]
+        SEC["Secrets:<br/>AWS_ROLE_ARN<br/>SSH_PRIVATE_KEY<br/>EC2_KEY_NAME"]
+        ART["Artifact:<br/>tf-outputs.json<br/>+ hosts.ini"]
+        OIDC["OIDC token"]
+        ENV["Environment:<br/>aws-destroy (reviewers)"]
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
+
+    subgraph AWS["AWS (free tier, us-east-1)"]
+        subgraph VPC["VPC 10.0.0.0/16"]
+            SUB["Public subnet"]
+            SG["Security group<br/>22 / 80"]
+            EC2["EC2 t3.micro<br/>Ubuntu 22.04<br/>tags: Environment=dev"]
+        end
     end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
+
+    subgraph AnsibleSide["Ansible"]
+        DYN["aws_ec2 dynamic<br/>inventory plugin"]
+        PB["site.yml<br/>Nginx + index<br/>+ /health + MOTD"]
     end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+
+    WF -- "1. plan + apply" --> VPC
+    WF --> ART
+    WF -- "2. SSH + dynamic inventory" --> DYN
+    DYN -.->|"filters tag:Environment=dev"| EC2
+    PB --> EC2
+    WF -- "3. curl :80" --> EC2
+    SEC --> WF
+    OIDC --> AWS
+    WF -.workflow_dispatch.-> ENV
+    ENV -.approved destroy.-> AWS
 ```
+
+### The pipeline job graph
+
+```mermaid
+flowchart TD
+    T["terraform<br/>OIDC auth, fmt, validate,<br/>plan, apply, output,<br/>upload artifact"]
+    A["ansible<br/>needs: terraform<br/>install ansible + collections,<br/>playbook vs dynamic inventory"]
+    S["smoke-test<br/>needs: ansible (+ terraform)<br/>curl --fail --retry :80 /health"]
+    D["destroy<br/>workflow_dispatch ONLY<br/>environment: aws-destroy<br/>(required reviewers)"]
+
+    T --> A --> S
+    T -. outputs.public_ip .-> S
+    D -. "manual cleanup,<br/>independent of other jobs" .-> T
+```
+
+### How data flows between jobs
+
+1. **`terraform` job** runs `terraform output -raw public_ip` into a step output, and also `terraform output -json > tf-outputs.json`. Both the JSON and the Terraform-generated `ansible/inventory/hosts.ini` are uploaded as the `terraform-outputs` artifact.
+2. The **`ansible` job** declares `needs: terraform`, downloads the artifact (available for inspection / as a static fallback), but actually runs the playbook against the **dynamic inventory** `inventory/aws_ec2.yml`, which queries the AWS API for running instances tagged `Environment=dev`.
+3. The **`smoke-test` job** declares `needs: [terraform, ansible]`, so it can read `needs.terraform.outputs.public_ip` directly — no parsing, no SSH.
+4. The **`destroy` job** has **no `needs:`** on purpose: it must be able to tear resources down even when the build jobs failed halfway, and it only runs on `workflow_dispatch` after a reviewer approves the `aws-destroy` environment.
+
+### Secrets pattern (no Vault in this lab)
+
+- **GitHub Actions**: `AWS_ROLE_ARN`, `SSH_PRIVATE_KEY`, and `EC2_KEY_NAME` live in repo Secrets. The private key is written to an ephemeral runner file (`~/.ssh/id_rsa`, mode `600`) and disappears with the runner.
+- **No Ansible Vault is needed** — the play stores no secrets. If you extend it with secrets, the pattern is: store the vault password in a GitHub Secret, then run `ansible-playbook --vault-password-file <(echo "$VAULT_PASSWORD") ...` (or write it to a temp file and delete it in the same step). Never commit a `.vault_pass` file — it is in `.gitignore` for exactly that reason.
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+**Accounts**
 
-## Cost Warning
+- A free AWS account (12-month free tier is fine).
+- A free GitHub account and a repository for this lab.
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+**Tools (local runs; CI only needs the YAML + secrets)**
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+| Tool | Version | Check with |
+| --- | --- | --- |
+| Terraform | >= 1.5.0 | `terraform version` |
+| Ansible (core) | >= 2.15 | `ansible --version` |
+| Python | >= 3.10 (with `pip`) | `python --version` |
+| boto3 + botocore | latest (dynamic inventory) | `pip install boto3 botocore` |
+| AWS CLI | 2.x | `aws --version` |
+| jq | any recent | `jq --version` |
+| make + curl | any | `make --version`, `curl --version` |
 
-## Contributing
+On Windows use Git Bash (bundled with Git for Windows) for the Makefile targets.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+**Environment variables (local runs)**
 
-## License
+| Variable | Purpose | Example |
+| --- | --- | --- |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` | AWS auth for Terraform, dynamic inventory, AWS CLI | from `aws configure` / `aws sso login` |
+| `AWS_REGION` | Region override (default `us-east-1`) | `us-east-1` |
+| `TF_VAR_key_name` | Name of an **existing** AWS EC2 key pair | `my-lab-key` |
 
-MIT — use it, fork it, teach with it.
+**AWS setup (once)**
+
+1. Create an EC2 key pair in the console, download the private key, and place it at `~/.ssh/id_rsa` (mode `600`).
+2. Create an IAM OIDC identity provider for `token.actions.githubusercontent.com` (audience `sts.amazonaws.com`) and an IAM role trustable by it. Trust policy sketch:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Principal": {
+         "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+       },
+       "Action": "sts:AssumeRoleWithWebIdentity",
+       "Condition": {
+         "StringEquals": {
+           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+           "token.actions.githubusercontent.com:sub": "repo:<OWNER>/<REPO>:ref:refs/heads/main"
+         }
+       }
+     }]
+   }
+   ```
+
+   Attach a policy allowing EC2/VPC management in `us-east-1` (e.g. PowerUserAccess scoped down for a lab).
+3. In GitHub: **Settings → Secrets and variables → Actions**, add `AWS_ROLE_ARN` (the role ARN), `SSH_PRIVATE_KEY` (full private key contents), and `EC2_KEY_NAME` (the key pair name from step 1).
+4. Optional but recommended for the gated destroy: **Settings → Environments → New environment** named `aws-destroy`, add **required reviewers** (yourself). The workflow already references this environment; without reviewers configured the job still runs, but nothing stops you.
+
+## Step-by-Step Instructions
+
+### A. Run the pipeline in GitHub Actions
+
+1. Push this lab to a branch and open a PR, or push directly to `main`.
+2. Go to the **Actions** tab → **full-pipeline** → watch the jobs run in order: `terraform` → `ansible` → `smoke-test`. Expected highlights:
+
+   ```text
+   terraform:  Apply complete! Resources: 8 added, 0 changed, 0 destroyed.
+   terraform:  public_ip = 54.123.45.67
+   ansible:    TASK [Ensure Nginx is enabled and running] ... changed: [54.123.45.67]
+   smoke-test: <h1>Hello from the Lab 17 full DevOps pipeline!</h1>
+   smoke-test: ok
+   ```
+
+3. Or trigger it manually: **Actions → full-pipeline → Run workflow** (this also enables the `destroy` job, see Cleanup).
+
+### B. Run the same pipeline locally
+
+```bash
+# 1. One-time setup: providers + Ansible collections
+make setup
+
+# 2. Provide your AWS credentials and key pair name
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=us-east-1
+export TF_VAR_key_name=my-lab-key
+
+# 3. Lint everything (fmt, validate, ansible-lint if installed)
+make lint
+
+# 4. Full local pipeline: terraform apply + ansible playbook + smoke test
+make all
+```
+
+Expected output ends with:
+
+```text
+Smoke-testing http://54.123.45.67/
+<h1>Hello from the Lab 17 full DevOps pipeline!</h1>
+ok
+```
+
+### C. Watch the dynamic inventory in action
+
+```bash
+ansible-inventory -i ansible/inventory/aws_ec2.yml --list | jq '."tag_Environment_dev".hosts'
+ansible-inventory -i ansible/inventory/aws_ec2.yml --graph
+```
+
+You should see your instance's public IP listed under the auto-created `tag_Environment_dev` group — with **no IP hardcoded anywhere** in the repo.
+
+## How Do I Know This Worked?
+
+| Check | Command | Success looks like |
+| --- | --- | --- |
+| All workflow jobs green | Actions tab | ✅ terraform ✅ ansible ✅ smoke-test |
+| Web page serves | `make smoke-test` or open `http://$(cd terraform && terraform output -raw public_ip)/` | HTML page with "Hello from the Lab 17 full DevOps pipeline!" |
+| Health endpoint | `curl http://<IP>/health` | body: `ok` |
+| SSH MOTD | `ssh -i ~/.ssh/id_rsa ubuntu@<IP>` | "Lab 17 capstone server — managed by Terraform + Ansible." banner |
+| Dynamic inventory resolves | `make ping` | `54.x.x.x \| SUCCESS => { "ping": "pong" }` |
+| Instance tagged correctly | `aws ec2 describe-instances --filters Name=tag:Environment,Values=dev --query 'Reservations[].Instances[].InstanceId'` | returns your instance ID |
+
+## Cleanup
+
+**Option 1 — local (fastest while you are experimenting):**
+
+```bash
+make destroy     # terraform destroy -auto-approve; removes every AWS resource
+```
+
+Confirm with:
+
+```bash
+aws ec2 describe-instances --filters Name=tag:Environment,Values=dev \
+  --query 'Reservations[]' --output text   # -> empty
+```
+
+**Option 2 — CI destroy (the "safe" path, recommended for shared repos):**
+
+1. **Actions → full-pipeline → Run workflow** (manual dispatch).
+2. Wait for the `destroy` job to reach the `aws-destroy` environment gate and **approve it** (required reviewers).
+3. The job runs `terraform init` + `terraform destroy -auto-approve` with OIDC credentials. Because the job has no `needs:`, it works even if `terraform`/`ansible` jobs failed and left orphans.
+
+## Troubleshooting
+
+**1. `Error: Could not assume role with OIDC` in the terraform job**
+- *Symptom:* the `Authenticate to AWS with OIDC` step fails with an assume-role error.
+- *Cause:* the IAM role's trust policy does not match the repo — wrong `sub` claim (`repo:OWNER/REPO:ref:refs/heads/main` vs the branch you pushed), wrong audience, or the OIDC provider does not exist in the account.
+- *Fix:* re-check the trust policy in the Prerequisites against your actual owner/repo/branch (workflow dispatches use the same `sub` for the default branch). Add the repo's thumbprint (`6938fd4d98bab03faadb97b34396831e3780aea1`) to the provider if it is missing.
+
+**2. Ansible reports "No inventory was parsed" or `skipping: no hosts matched`**
+- *Symptom:* the ansible job fails before running any task, or the playbook matches zero hosts.
+- *Cause:* the `amazon.aws` collection or `boto3` is not installed, AWS credentials are missing (the dynamic inventory calls `DescribeInstances`), the region differs from Terraform's, or the instance does not carry the `Environment=dev` tag yet (timing — the instance may still be in `pending` state; the plugin filters on `instance-state-name: running`).
+- *Fix:* confirm `pip install ansible boto3 botocore` and `ansible-galaxy collection install -r ansible/requirements.yml` ran, that the OIDC step precedes the playbook, and re-run — instance state and tags are settled by the time `needs: terraform` completes in practice. Locally, run `make ping` to debug the inventory alone.
+
+**3. Smoke test fails with `Connection refused` even though Ansible succeeded**
+- *Symptom:* `curl --fail ... http://<IP>/` retries 10 times and still fails.
+- *Cause:* the security group does not allow inbound TCP 80 from `0.0.0.0/0`, Nginx failed to start (check `systemctl status nginx` over SSH), or — in CI — the `smoke-test` job cannot read the IP because `terraform` was not listed in its `needs:` (job outputs are only visible to direct dependents).
+- *Fix:* verify port 80 ingress in `terraform/main.tf`, SSH in and check Nginx, and make sure the workflow declares `needs: [terraform, ansible]` on the smoke-test job (this lab's workflow already does).
+
+## Free Tier Notes
+
+- This lab creates exactly **one `t3.micro`** (free tier: 750 hours/month for 12 months), one small VPC/subnet/IGW/security group, and a dynamic public IP — all free. Data transfer out is free up to 15 GB/month; a few `curl` smoke tests use kilobytes.
+- **Free tiers change.** Before running anything, check the current AWS Free Tier page for your account type, and afterwards check **Billing → Cost Explorer** to confirm $0 (or near-$0) spend.
+- The biggest free-tier risk is forgetting the instance running: at ~730 hours/month, one instance is fine, but **two** instances or leftovers from other labs can exceed the allowance.
+- Always finish with `make destroy` (or the gated CI destroy). Left-running resources are the #1 cause of surprise bills.
+- Re-running the pipeline repeatedly is fine — Terraform is idempotent, so applies cost nothing extra beyond the running instance time.
