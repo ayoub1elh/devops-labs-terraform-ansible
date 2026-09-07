@@ -1,0 +1,21 @@
+---
+# Placeholder workflow.
+#
+# GitHub only shows the "Actions" tab once at least one workflow exists on the
+# default branch. This no-op workflow exists solely for that purpose; real
+# CI workflows live on the individual lab branches.
+name: placeholder
+
+on:
+  workflow_dispatch:  # manual trigger only — never runs on push/PR
+
+permissions:
+  contents: read
+
+jobs:
+  no-op:
+    name: No-op
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say hello
+        run: echo "This is a placeholder. Checkout a lab branch to see real workflows."
