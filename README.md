@@ -206,6 +206,16 @@ rm -f "$HOME/bin/tfsec"
    - **Fix:** The workflow adds `$HOME/bin` to `GITHUB_PATH` before the verify step. If you
      edited the workflow, ensure that step runs **before** the version-check loop, then re-push.
 
+4. **`fatal: detected dubious ownership in repository` (WSL)**
+   - **Symptom:** Any `git` command inside WSL fails when the repo lives on a Windows drive
+     (`/mnt/c/...`), because the folder is owned by your Windows user, not the WSL user.
+   - **Cause:** Git's safe.directory protection treats the foreign-owned repo as untrusted.
+   - **Fix:** Tell Git to trust it once:
+     ```bash
+     git config --global --add safe.directory /mnt/c/Users/ayoub/Desktop/devops-labs-terraform-ansible
+     ```
+     (Use `'*'` instead of the path to trust all your repos — fine on a personal machine.)
+
 ## Free Tier Notes
 
 - **This lab provisions zero cloud resources** — there is no AWS, Azure, or GCP usage, so there

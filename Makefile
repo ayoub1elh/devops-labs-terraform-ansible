@@ -16,6 +16,11 @@ TFSEC_BIN := $(HOME)/bin/tfsec
 UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
 IS_WINDOWS := $(filter MINGW% MSYS% CYGWIN%,$(UNAME_S))
 
+# pipx installs app entry points into ~/.local/bin and this Makefile may
+# place binaries in ~/bin; make them visible to this and child shells so a
+# fresh install is picked up without re-opening the terminal.
+export PATH := $(HOME)/.local/bin:$(HOME)/bin:$(PATH)
+
 .PHONY: setup install-tools lint test deploy destroy clean
 
 ## setup: verify every tool is installed; install missing ones via pipx/installers, then re-check.
@@ -48,20 +53,32 @@ install-tools:
 ifeq ($(IS_WINDOWS),)
 	@echo "==> Installing missing tools (idempotent)..."
 	@command -v pipx >/dev/null 2>&1 || { \
-		echo "pipx not found — installing..."; \
-		python3 -m pip install --user pipx; \
-		pipx ensurepath; \
-		echo "NOTE: re-open your terminal (or run 'make setup' again) so pipx's PATH takes effect."; \
+		echo "pipx not found - installing..."; \
+		if command -v apt-get >/dev/null 2>&1; then \
+			sudo apt-get install -y pipx; \
+		else \
+			python3 -m pip install --user pipx || python3 -m pip install --user --break-system-packages pipx || true; \
+		fi; \
+		pipx ensurepath 2>/dev/null || true; \
+		echo "NOTE: pipx apps land in ~/.local/bin; this Makefile already adds it to PATH."; \
 	}
 	@command -v ansible >/dev/null 2>&1 || pipx install --include-deps ansible || true
 	@command -v ansible-lint >/dev/null 2>&1 || pipx install ansible-lint || true
 	@command -v molecule >/dev/null 2>&1 || pipx install molecule || true
 	@command -v checkov >/dev/null 2>&1 || pipx install checkov || true
 	@command -v terraform >/dev/null 2>&1 || { \
-		echo "installing terraform via HashiCorp's official installer..."; \
-		wget -q https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip -O /tmp/terraform.zip; \
-		unzip -o -q /tmp/terraform.zip -d /tmp/; \
-		sudo mv /tmp/terraform /usr/local/bin/ 2>/dev/null || mv /tmp/terraform "$(HOME)/bin/" 2>/dev/null || mkdir -p "$(HOME)/bin" && mv /tmp/terraform "$(HOME)/bin/"; \
+		echo "installing terraform via HashiCorp's official release archive..."; \
+		tmp=$$(mktemp -d); \
+		wget -q "https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip" -O "$$tmp/terraform.zip"; \
+		unzip -o -q "$$tmp/terraform.zip" -d "$$tmp"; \
+		if sudo install -m 0755 "$$tmp/terraform" /usr/local/bin/terraform 2>/dev/null; then \
+			echo "installed terraform to /usr/local/bin"; \
+		else \
+			mkdir -p "$(HOME)/bin"; \
+			install -m 0755 "$$tmp/terraform" "$(HOME)/bin/terraform"; \
+			echo "NOTE: no sudo - installed terraform to $(HOME)/bin (already on this Makefile's PATH; add it to ~/.profile for other shells)"; \
+		fi; \
+		rm -rf "$$tmp"; \
 	}
 	@command -v tflint >/dev/null 2>&1 || { \
 		echo "installing tflint via its official install script..."; \
