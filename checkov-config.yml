@@ -1,0 +1,37 @@
+# ---------------------------------------------------------------------------
+# checkov-config.yml — Configuration for the Checkov static security scanner.
+#
+# Used by the CI workflow (.github/workflows/security.yml) as:
+#     checkov -d . --config-file checkov-config.yml
+#
+# KEY IDEA OF THIS LAB: `soft-fail: true` makes checkov EXIT 0 even when it
+# finds issues. The pipeline stays green (findings are warnings, not
+# blockers) while every finding is still printed in the job log and the
+# GitHub Actions UI. This models a real "report, don't block" security-scan
+# rollout. Remove soft-fail (or set it to false) once your team agrees which
+# checks should actually break the build.
+#
+# The `skip-check` list below is the OTHER suppression mechanism checkov
+# supports — a centralized, reviewed list. Prefer inline
+# `# checkov:skip=CKV_AWS_123: <reason>` comments in code for one-off false
+# positives (they keep the reason next to the code); use this list only for
+# checks you intentionally and permanently disable for the whole repo.
+# ---------------------------------------------------------------------------
+
+framework:
+  - terraform
+
+# Report every finding but never fail the build because of one.
+soft-fail: true
+
+# Checks to skip repository-wide. Each entry must carry a justification.
+# Keep this list SHORT and review it in PRs — see the README's warning about
+# preferring fixes over suppressions.
+skip-check:
+  # Example (commented out): if your org decides detailed monitoring is a
+  # paid feature you deliberately opt out of everywhere:
+  # - CKV_AWS_126  # EC2 detailed monitoring — costs money on free tier
+
+# Quiet down noisy informational checks while keeping the real signal.
+compact: true
+quiet: false

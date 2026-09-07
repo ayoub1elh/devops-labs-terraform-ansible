@@ -1,0 +1,25 @@
+# ---------------------------------------------------------------------------
+# terraform.tfvars.example — Template for your local terraform.tfvars file.
+#
+# Copy this file to terraform.tfvars and fill in YOUR values:
+#     cp terraform.tfvars.example terraform.tfvars
+# terraform.tfvars is gitignored (see .gitignore) so your settings — and any
+# sensitive values — never reach the repository.
+#
+# The lab works with NO tfvars file at all: every variable has a safe default
+# (SSH effectively disabled, us-east-1, t2.micro). Only set aws_region or
+# ssh_cidr if you actually need to.
+# ---------------------------------------------------------------------------
+
+# AWS region for all resources. us-east-1 is the default and recommended:
+# it has the widest free-tier AMI availability.
+# aws_region = "us-east-1"
+
+# Your public IP in CIDR form, so you can SSH into the instance if you want
+# to inspect it. Find it with: curl -s https://checkip.amazonaws.com
+# Append /32, e.g. "203.0.113.10/32". Leave commented out to disable SSH
+# entirely (the default 0.0.0.0/32 matches no IP).
+# ssh_cidr = "203.0.113.10/32"
+
+# Name of an existing EC2 key pair if you set ssh_cidr above, e.g. "my-laptop".
+# ec2_key_name = "my-laptop"
