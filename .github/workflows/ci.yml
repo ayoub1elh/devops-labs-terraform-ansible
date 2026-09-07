@@ -1,0 +1,51 @@
+# CI for Lab 01 (Docker provider).
+#
+# IMPORTANT: this workflow only formats, initializes, and VALIDATES + PLANS.
+# It never runs `terraform apply`: GitHub-hosted runners do not have a Docker
+# daemon to deploy against, and this lab targets your *local* Docker engine.
+# Run `make deploy` (or terraform apply) on your own machine to deploy.
+
+name: ci-lab-01-docker-provider
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "staging/lab-01-docker-provider/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "staging/lab-01-docker-provider/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: Format, init, validate, plan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: staging/lab-01-docker-provider
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.x"
+
+      - name: Check formatting (terraform fmt -check)
+        run: terraform fmt -check -recursive
+
+      - name: Initialize Terraform (backend=false, no apply)
+        run: terraform init -backend=false -input=false
+
+      - name: Validate configuration
+        run: terraform validate
+
+      - name: Terraform plan (validation only, no apply)
+        run: terraform plan -lock=false -input=false -no-color
