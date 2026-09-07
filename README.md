@@ -1,128 +1,202 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 02 — Variables, Locals & Outputs
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+In Lab 01 you deployed an Nginx container with everything hardcoded. Real Terraform code doesn't work that way: this lab rebuilds the exact same container, but the image name, host port, and container name prefix are all **input variables** (optionally set in a `terraform.tfvars` file), the final container name is computed with **locals**, and useful values are exposed as **outputs** — including a ready-to-click URL built with the `format()` function.
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+## Learning Objectives
 
-## How to Use This Repository
+By the end of this lab you will be able to:
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
+- Declare Terraform variables with `type`, `description`, and `default` values
+- Override variables using a `terraform.tfvars` file (from `terraform.tfvars.example`)
+- Add input validation to variables (`validation` blocks)
+- Combine variables, resources, and functions into computed values using `locals`
+- Understand why `random_id` beats `timestamp()` for stable unique names
+- Define outputs and build formatted strings with `format()`
+- Query outputs after apply with `terraform output`
 
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+    subgraph Terraform["Terraform Configuration"]
+        V[variables.tf<br/>image_name, host_port,<br/>container_name_prefix]
+        L[locals.tf<br/>computed container_name]
+        M[main.tf<br/>random_id + docker_image<br/>+ docker_container]
+        O[outputs.tf<br/>id, name, port, URL]
+        V --> L
+        L --> M
+        M --> O
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
+    subgraph Docker["Docker (local, free)"]
+        IMG[(nginx image)]
+        C[nginx container<br/>:80 -> host_port]
     end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
-    end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+    TFVARS[(terraform.tfvars<br/>(gitignored))]
+    TFVARS -.overrides.-> V
+    M --> IMG
+    M --> C
+    USER([You]) -->|"curl http://localhost:8080"| C
 ```
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+| Tool | Version (tested) | Notes |
+|------|------------------|-------|
+| Git | any recent | to clone the repo |
+| Terraform | >= 1.5.0 | `terraform -version` to check |
+| Docker Desktop / Docker Engine | any recent | must be **running** |
+| make | any GNU/BSD make | optional — all steps work as plain commands too |
+| curl | any | for verification (or just open the URL in a browser) |
 
-## Cost Warning
+- **Free accounts needed:** none. This lab runs only on your local Docker daemon — no AWS, no Terraform Cloud, no API keys, no environment variables.
+- **Required environment variables:** none.
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+## Step-by-Step Instructions
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+All commands run from the lab directory (the folder containing this README).
 
-## Contributing
+**1. Verify prerequisites**
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+```bash
+make setup
+```
 
-## License
+Expected output (versions will vary):
 
-MIT — use it, fork it, teach with it.
+```
+Checking prerequisites...
+Terraform v1.9.x
+Docker version 27.x.x
+All prerequisites OK.
+```
+
+**2. (Optional) Create your tfvars file**
+
+The lab works with defaults, but creating a tfvars file is the point of this exercise:
+
+```bash
+cp terraform.tfvars.example terraform.tfvars
+```
+
+Edit `terraform.tfvars` and change at least one value, for example:
+
+```hcl
+host_port             = 9090
+container_name_prefix = "my-lab02"
+```
+
+> `terraform.tfvars` is gitignored (see `.gitignore`) — your overrides stay local.
+
+**3. Look at the plan**
+
+```bash
+terraform init
+terraform plan
+```
+
+In the plan, notice that the container **name** is computed — you should see something like `+ name = "my-lab02-a1b2c3d4"` (your suffix will differ). This value comes from `locals.tf`.
+
+**4. Apply**
+
+```bash
+terraform apply
+```
+
+Type `yes` when prompted. Expected output (abbreviated):
+
+```
+random_id.name_suffix: Creation complete ...
+docker_image.nginx: Creation complete ...
+docker_container.nginx: Creation complete ...
+
+Apply complete! Resources: 3 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+container_id = "f3d4..."
+container_name = "my-lab02-a1b2c3d4"
+mapped_port = 9090
+url = "http://localhost:9090"
+```
+
+(Or simply `make deploy`, which does init → plan → apply for you.)
+
+**5. Inspect the outputs on demand**
+
+```bash
+terraform output
+terraform output -raw url
+```
+
+The second command prints just the URL — a pattern you will reuse in scripts and later labs.
+
+## How Do I Know This Worked?
+
+**1. The outputs exist:**
+
+```bash
+terraform output url
+# "http://localhost:9090"
+```
+
+**2. The container is actually running with the computed name:**
+
+```bash
+docker ps --filter "name=$(terraform output -raw container_name)"
+```
+
+You should see your container, with `0.0.0.0:9090->80/tcp` in the PORTS column.
+
+**3. Nginx serves the welcome page:**
+
+```bash
+curl "$(terraform output -raw url)"
+```
+
+Expected: HTML containing `<title>Welcome to nginx!</title>`.
+
+**4. (Bonus) Variables drive the plan.** Change `host_port` in `terraform.tfvars` and run `terraform plan` again — Terraform should show it will **replace** the container to apply the new port, because the port is a variable-driven argument.
+
+## Cleanup
+
+Tear down the container and remove local state:
+
+```bash
+terraform destroy    # type yes, or: terraform destroy -auto-approve
+make clean           # removes .terraform/, state files, lock file
+```
+
+Then verify nothing is left:
+
+```bash
+docker ps -a --filter "name=lab02"
+terraform state list
+```
+
+Both should return empty results (the second will error with "No state file was found" — that's expected after `make clean`).
+
+## Troubleshooting
+
+**1. `Error: Error response from daemon: port is already allocated`**
+
+- **Symptom:** apply fails when creating the container.
+- **Cause:** another container (or app) already uses `host_port`.
+- **Fix:** pick a different port in `terraform.tfvars` (e.g. `host_port = 9091`) and re-run `terraform apply`. Find the conflict with `docker ps` or `netstat -ano | grep <port>`.
+
+**2. `Error: Invalid value for variable: host_port must be a valid TCP port number...`**
+
+- **Symptom:** `terraform plan` fails before planning anything.
+- **Cause:** you set `host_port` in `terraform.tfvars` to something outside 1–65535 (e.g. `0`, `70000`, or a string).
+- **Fix:** fix the value in `terraform.tfvars`. This error comes from the `validation` block in `variables.tf` — a habit worth building early.
+
+**3. `terraform plan` always wants to replace the container, even when nothing changed**
+
+- **Symptom:** every plan shows `-/+ docker_container.nginx` with the name changing.
+- **Cause:** the container name was built with `timestamp()` (or another value that changes each run) instead of a stable random suffix. Terraform sees a "new" name and plans replacement forever — a perpetual diff.
+- **Fix:** this lab already does it right — see the comment in `locals.tf`. If you experiment and hit this, build the name from `random_id.name_suffix.hex` (stored in state, stable between runs) instead of `timestamp()`.
+
+## Free Tier Notes
+
+- This lab creates **only a local Docker container** — there are no cloud resources and **zero cost** beyond your own machine.
+- No AWS or Terraform Cloud accounts are used, so there is nothing to check in a billing console for this lab.
+- General warning (applies to the later cloud labs in this repo): **cloud free tiers change over time**. Whenever a lab does create cloud resources, always run `make destroy`/`terraform destroy` when finished, and check the provider's billing console afterwards.
