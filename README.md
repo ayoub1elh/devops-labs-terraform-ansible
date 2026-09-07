@@ -1,128 +1,194 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 12 — Molecule Testing (Test an Ansible Role in Docker)
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+In Lab 11 you refactored your Nginx playbook into a reusable `webserver` **role**. But how do you *prove* the role works — and keeps working after every change? In this lab you test the role with **Molecule**, the standard test framework for Ansible roles. Molecule spins up a throwaway Docker container, applies your role to it (**converge**), checks that a second run changes nothing (**idempotence**), runs your verification playbook (**verify**), and then destroys the container. The same test runs in **GitHub Actions** on every push, so broken roles never reach `main`.
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+## Learning Objectives
 
-## How to Use This Repository
+- Explain the Molecule test lifecycle: `dependency → create → prepare → converge → idempotence → verify → destroy`
+- Configure the Molecule **Docker driver** with a systemd-capable Ubuntu 22.04 image
+- Write a `converge.yml` playbook that applies a role to the test instance
+- Write a `verify.yml` playbook that uses `ansible.builtin.uri` and `ansible.builtin.assert` to test real HTTP behavior
+- Run individual Molecule subcommands (`converge`, `verify`, `test`) and interpret their output
+- Run the full Molecule test in **GitHub Actions CI** for free
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
-
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+    subgraph Local["Your Machine / CI Runner"]
+      MO["molecule CLI"]
+      AP["ansible-playbook"]
+      LINT["ansible-lint"]
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
+    subgraph Docker["Docker"]
+      C1["Test container<br/>geerlingguy/docker-ubuntu2204-ansible<br/>(Ubuntu 22.04 + systemd + Python 3)"]
     end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
+    subgraph Role["roles/webserver"]
+      T["tasks / handlers<br/>defaults / vars"]
+      MOL["molecule/default<br/>molecule.yml · converge.yml · verify.yml"]
     end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+    MO --> AP --> C1
+    MO --> MOL
+    LINT --> Role
+    C1 -- "HTTP GET :80" --> C1
+    subgraph GH["GitHub Actions"]
+      CI["molecule.yml workflow<br/>ubuntu-latest runner"]
+    end
+    CI --> MO
 ```
+
+The role code from Lab 11 is unchanged — everything Molecule-specific lives in `roles/webserver/molecule/default/`.
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+| Tool | Version | Notes |
+|------|---------|-------|
+| Docker Desktop (or Docker Engine) | 20.10+ | Daemon **must be running**; Molecule talks to it via the `docker` Python package |
+| Python | 3.10+ | `python3 --version` |
+| pip | latest | Used to install the Python tooling |
+| Git | any | To clone the repo |
 
-## Cost Warning
+Free accounts needed: **none** — everything runs locally in Docker or in the free GitHub Actions runner. No AWS, no Terraform Cloud, no secrets.
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+Environment variables: **none required**. (If your Docker daemon is remote, set `DOCKER_HOST` as usual — not needed for local Docker Desktop.)
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+> On Windows: run everything from **Git Bash** or WSL2, not plain `cmd`. Docker Desktop must be in Linux-container mode.
 
-## Contributing
+## Step-by-Step Instructions
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+**1. Install the tooling** (Ansible, Molecule, and the Docker driver):
 
-## License
+```bash
+make setup
+```
 
-MIT — use it, fork it, teach with it.
+Or manually:
+
+```bash
+python3 -m pip install --upgrade pip
+python3 -m pip install ansible ansible-lint yamllint molecule "molecule-plugins[docker]" docker
+```
+
+Expected output (versions vary):
+
+```
+ansible [core 2.16.x]
+molecule 6.x.x using python 3.x
+```
+
+**2. Make sure Docker is running:**
+
+```bash
+docker info >/dev/null && echo "Docker is up"
+# Docker is up
+```
+
+**3. Explore the scenario.** Look at `roles/webserver/molecule/default/molecule.yml` — it defines one platform (`ubuntu2204`) based on `geerlingguy/docker-ubuntu2204-ansible`, a ready-made Ubuntu 22.04 image with Python 3 and systemd preconfigured, running in `privileged` mode with a `/sys/fs/cgroup` volume so systemd works inside the container.
+
+> **Alternative image:** you can use a plain `ubuntu:22.04` image instead, but you must add `privileged: true`, `cgroupns_mode: host`, mount `/sys/fs/cgroup:/sys/fs/cgroup:rw`, add a `prepare.yml` playbook that installs `python3`, and make sure systemd actually starts. The geerlingguy image exists precisely to skip all that — stick with it unless you want the extra challenge.
+
+**4. Create the test container and apply the role (converge):**
+
+```bash
+cd roles/webserver
+molecule create     # starts the container
+molecule converge   # runs converge.yml -> applies the webserver role
+```
+
+Expected output ends with something like:
+
+```
+PLAY RECAP *********************************************************************
+ubuntu2204                 : ok=9    changed=7    unreachable=0    failed=0    skipped=0
+```
+
+**5. Verify the role actually works** — this runs `verify.yml`, which HTTP-requests Nginx and asserts HTTP 200:
+
+```bash
+molecule verify
+```
+
+Expected output:
+
+```
+TASK [Assert the index page returns HTTP 200] **********************************
+ok: [ubuntu2204] => {
+    "msg": "Nginx returned HTTP 200 on port 80"
+}
+...
+PLAY RECAP *********************************************************************
+ubuntu2204                 : ok=6    changed=0    failed=0
+```
+
+**6. Look inside (optional debugging):**
+
+```bash
+molecule login        # shell inside the container
+curl -s localhost:80  # should print the welcome page
+exit
+```
+
+**7. Run the full test sequence** — this is what CI runs:
+
+```bash
+molecule test
+```
+
+`molecule test` runs the whole lifecycle and always destroys the container at the end (even on failure). Look for the **idempotence** step: Molecule runs `converge` a second time and requires **zero** `changed` tasks. Expected tail of output:
+
+```
+PLAY RECAP *********************************************************************
+ubuntu2204                 : ok=9    changed=0    unreachable=0    failed=0
+...
+Verifier completed successfully.
+```
+
+**8. Run it in CI.** Push the branch and open a PR — the `.github/workflows/molecule.yml` workflow installs Ansible + Molecule + the Docker driver on an `ubuntu-latest` runner and runs `molecule test` inside `roles/webserver`. No secrets needed.
+
+## How Do I Know This Worked?
+
+- `molecule verify` prints `Verifier completed successfully` and all three asserts show `ok`.
+- The idempotence step in `molecule test` reports `changed=0` on the second converge — your role is safe to re-run.
+- In GitHub: the **Molecule** workflow shows a green checkmark on your commit/PR.
+- Quick manual check while the container exists (`molecule create && molecule converge`):
+
+```bash
+molecule login -- /bin/sh -c "curl -s -o /dev/null -w '%{http_code}' localhost:80"
+# 200
+```
+
+## Cleanup
+
+Molecule containers are throwaway; nothing touches the cloud.
+
+```bash
+molecule destroy          # from roles/webserver/ — removes the test container
+docker ps -a | grep ubuntu2204   # confirm it is gone (should print nothing)
+```
+
+`make destroy` and `make clean` (from the lab root) wrap the same steps and also delete local caches. `molecule test` destroys the container automatically, so CI leaves nothing behind.
+
+## Troubleshooting
+
+**1. `Error response from daemon: ...` / "Cannot connect to the Docker daemon" when running `molecule create`**
+- *Symptom:* Molecule fails immediately with a Docker connection error.
+- *Cause:* The Docker daemon is not running (Docker Desktop closed, or the service is stopped).
+- *Fix:* Start Docker Desktop (or `sudo systemctl start docker` on Linux) and re-run `docker info` to confirm it responds.
+
+**2. Idempotence test fails with a non-zero `changed` count**
+- *Symptom:* `molecule test` fails at the idempotence step; the second converge shows tasks in `changed`.
+- *Cause:* A task is not idempotent — commonly a `command`/`shell` task that always runs, or a template that embeds a value that changes every run (like a timestamp — this is why our `index.html.j2` uses only static facts like `ansible_hostname`).
+- *Fix:* Make the task state-driven: use `creates:`/`removes:` on command tasks, or replace shell one-liners with proper modules (`ansible.builtin.file`, `ansible.builtin.template`, `ansible.builtin.lineinfile`). Re-run `molecule converge` twice locally until the second run shows `changed=0`.
+
+**3. `AttributeError: module 'docker' has no attribute ...` or "Failed to import the required Python library (Docker SDK for Python)"**
+- *Symptom:* Molecule can't create the container and mentions the Docker SDK.
+- *Cause:* The `docker` Python package is missing or outdated, or you installed `molecule` without the Docker driver plugin.
+- *Fix:* `python3 -m pip install --upgrade "molecule-plugins[docker]" docker`. Prefer **pip** for Molecule itself (distro `apt` packages ship older, incompatible Molecule/Ansible combinations); if you already installed via apt, `python3 -m pip uninstall molecule` first, then reinstall with pip. Use a virtualenv (`python3 -m venv .venv && source .venv/bin/activate`) if your system pip is externally managed.
+
+## Free Tier Notes
+
+This lab creates **no cloud resources** — everything runs in a local Docker container, and CI runs on the free `ubuntu-latest` GitHub-hosted runner. Costs to worry about: none. Even so, good habits apply everywhere:
+
+- Free tiers and quotas **change over time** — always run the Cleanup steps and check billing dashboards after labs that do touch the cloud.
+- The `geerlingguy/docker-ubuntu2204-ansible` image is pulled from Docker Hub; anonymous pulls are rate-limited (currently 100/6h per IP), far more than this lab needs.
+- The GitHub Actions runner is free for public repos and includes a monthly allowance for private repos — this workflow uses a few minutes per run.
