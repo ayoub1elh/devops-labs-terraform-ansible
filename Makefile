@@ -10,6 +10,12 @@ TOOLS := terraform ansible tflint ansible-lint checkov tfsec molecule
 # Path where tfsec's release binary is placed by the `install-tools` target.
 TFSEC_BIN := $(HOME)/bin/tfsec
 
+# Detect Git Bash / MSYS on Windows. The automatic installers in
+# `install-tools` target Linux/macOS only, so on Windows we print
+# instructions instead of running them.
+UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
+IS_WINDOWS := $(filter MINGW% MSYS% CYGWIN%,$(UNAME_S))
+
 .PHONY: setup install-tools lint test deploy destroy clean
 
 ## setup: verify every tool is installed; install missing ones via pipx/installers, then re-check.
@@ -36,7 +42,10 @@ setup: install-tools
 	@echo "==> All $(words $(TOOLS)) tools are installed and on PATH. Toolchain OK."
 
 ## install-tools: install any missing tool (idempotent — skips what is already present).
+# Linux/macOS: install automatically. Windows Git Bash: print manual steps —
+# the commands below need python3/pipx/wget/sudo, which Git Bash does not provide.
 install-tools:
+ifeq ($(IS_WINDOWS),)
 	@echo "==> Installing missing tools (idempotent)..."
 	@command -v pipx >/dev/null 2>&1 || { \
 		echo "pipx not found — installing..."; \
@@ -65,6 +74,18 @@ install-tools:
 		chmod +x "$(TFSEC_BIN)"; \
 		echo "NOTE: add $(HOME)/bin to PATH if tfsec is still not found."; \
 	fi
+else
+	@echo "==> Windows (Git Bash) detected - automatic installers target Linux/macOS only."
+	@echo "==> Pick one:"
+	@echo "==>   A) GitHub Codespaces (zero install): press '.' on the repo page, reopen in Codespace, then 'make setup'."
+	@echo "==>   B) WSL2 (Ubuntu): this Makefile then works unmodified."
+	@echo "==>   C) Stay on Git Bash - install manually, then re-run 'make setup':"
+	@echo "==>      choco install python make terraform -y        (admin PowerShell)"
+	@echo "==>      git checkout main -- requirements.txt        (pinned pip tools)"
+	@echo "==>      python -m pip install -r requirements.txt    (ansible, ansible-lint, molecule, checkov, yamllint)"
+	@echo "==>      tflint + tfsec: download Windows binaries from their GitHub Releases pages."
+	@echo "==> Falling through to the PATH check so you can see exactly what is missing..."
+endif
 
 ## lint: nothing to lint in this lab — the linters themselves are validated by `make setup`.
 lint:
