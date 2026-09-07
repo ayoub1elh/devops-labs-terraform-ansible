@@ -1,0 +1,94 @@
+# terraform-cicd.yml — Terraform plan on pull requests, apply on merge to main.
+#
+# Authentication uses AWS OIDC: the workflow exchanges a GitHub ID token for
+# short-lived AWS credentials via the IAM role in the AWS_ROLE_ARN secret.
+# NO long-lived access keys are stored anywhere.
+#
+# Required repository settings:
+#   Secrets:  AWS_ROLE_ARN  (ARN of the OIDC role, from `terraform output
+#                            github_actions_role_arn` in oidc.tf)
+#   Variables (optional): AWS_REGION (defaults to us-east-1)
+
+name: terraform-cicd
+
+on:
+  pull_request:
+    paths:
+      - "**.tf"
+      - ".github/workflows/terraform-cicd.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "**.tf"
+      - ".github/workflows/terraform-cicd.yml"
+
+# Minimal permissions: the ID token is needed for OIDC; contents: read is
+# enough to check out the repo.
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_VERSION: "1.9.8"
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+jobs:
+  terraform:
+    name: Terraform ${{ github.event_name == 'push' && 'apply' || 'plan' }}
+    runs-on: ubuntu-latest
+
+    # Never run apply on a pull request, no matter what (the apply step
+    # below is gated on event + branch explicitly).
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          # Short sessions: if a token leaks, it dies quickly.
+          role-session-name: github-actions-lab08
+
+      - name: Terraform fmt (check only, fixes nothing)
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        run: terraform validate -no-color
+
+      - name: Terraform plan
+        id: plan
+        run: |
+          terraform plan -no-color -input=false \
+            -out=tfplan \
+            | tee plan-output.txt
+
+      - name: Post plan output to job summary (PRs only)
+        if: github.event_name == 'pull_request'
+        run: |
+          {
+            echo "## Terraform Plan"
+            echo ""
+            echo '```terraform'
+            # Keep the summary manageable; GitHub truncates very long comments.
+            tail -n 200 plan-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Terraform apply (merge to main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve -input=false tfplan
+
+      - name: Show outputs after apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terraform output -no-color
