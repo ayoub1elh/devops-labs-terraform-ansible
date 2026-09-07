@@ -1,0 +1,80 @@
+---
+# Lab 00 — Environment Setup & Toolchain Validation
+#
+# Runs on every push and pull request. Installs the full lab toolchain on an
+# ubuntu-latest runner (Terraform, Ansible, tflint, ansible-lint, checkov,
+# tfsec, Molecule) and verifies each tool is on PATH by printing its version.
+# This lab provisions no cloud resources, so no AWS credentials are needed.
+
+name: setup
+
+on:
+  push:
+  pull_request:
+
+# Least-privilege: this workflow only reads the repo contents.
+permissions:
+  contents: read
+
+jobs:
+  validate-toolchain:
+    name: Install and verify lab toolchain
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python (needed by pipx-installed tools)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Install tflint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: Install Ansible toolchain, checkov, and Molecule via pipx
+        run: |
+          # pipx is preinstalled on ubuntu-latest runners; --include-deps pulls in
+          # ansible-core so `ansible --version` works out of the box.
+          pipx install --include-deps ansible
+          pipx install ansible-lint
+          pipx install checkov
+          pipx install molecule
+          pipx ensurepath
+
+      - name: Install tfsec (release binary)
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -sL "https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64" -o "$HOME/bin/tfsec"
+          chmod +x "$HOME/bin/tfsec"
+          # Make $HOME/bin visible to later steps (incl. the verify step).
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Verify tool versions
+        run: |
+          # Fail fast if any tool is missing; print the version of each.
+          set -e
+          for tool in terraform ansible tflint ansible-lint checkov tfsec molecule; do
+            echo "::group::$tool"
+            command -v "$tool"
+            case "$tool" in
+              terraform)        terraform version ;;
+              ansible)          ansible --version ;;
+              tflint)           tflint --version ;;
+              ansible-lint)     ansible-lint --version ;;
+              checkov)          checkov --version ;;
+              tfsec)            tfsec --version ;;
+              molecule)         molecule --version ;;
+            esac
+            echo "::endgroup::"
+          done
+          echo "All 7 tools installed and on PATH. Toolchain OK."
