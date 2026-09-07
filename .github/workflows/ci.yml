@@ -1,0 +1,53 @@
+# .github/workflows/ci.yml — Lab 03 (Modules)
+#
+# Continuous integration for the lab: on every push and pull request we check
+# formatting recursively, initialize, validate, and run terraform plan.
+#
+# This lab targets a LOCAL Docker daemon. GitHub-hosted ubuntu-latest runners
+# ship with Docker installed and running, so `terraform plan` can talk to the
+# daemon exactly as it does on your machine. No cloud credentials are needed,
+# and none should ever be added as long-lived secrets.
+
+name: ci
+
+on:
+  push:
+    branches:
+      - lab-03-modules
+      - main
+  pull_request:
+    branches:
+      - lab-03-modules
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: fmt / validate / plan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Verify Docker is available (needed by the docker provider)
+        run: docker version
+
+      - name: Check formatting of all Terraform files (recursive)
+        run: terraform fmt -check -recursive
+
+      - name: Initialize Terraform
+        run: terraform init -backend=false
+
+      - name: Validate the configuration
+        run: terraform validate
+
+      - name: Run terraform plan
+        run: terraform plan -no-color -input=false
