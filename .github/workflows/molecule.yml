@@ -31,7 +31,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
 
       # ubuntu-latest runners already have the Docker daemon running, so
       # no extra Docker setup is needed. Docker Engine ships with the
