@@ -1,9 +1,17 @@
-# ─── Terraform ────────────────────────────────────────────────────────────────
-# Local .terraform directories and lock files (per-branch/module)
-**/.terraform/*
-**/.terraform.lock.hcl
+# =============================================================================
+# .gitignore — Lab 06: Terraform Workspaces
+#
+# Terraform state (especially per-workspace state under terraform.tfstate.d/)
+# can contain sensitive values and must never be committed. Ansible ignores
+# are included so the file is drop-in ready for labs that mix both tools.
+# =============================================================================
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+terraform.tfstate.d/
 crash.log
 crash.*.log
 *.tfvars
@@ -12,31 +20,24 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
-.terraformrc
-terraform.rc
 
-# ─── Ansible ──────────────────────────────────────────────────────────────────
-*.retry                # ansible-playbook retry files
-.vault_pass            # never commit vault passwords
-*.vault_pass
-ansible.log
-
-# ─── Molecule / tests ─────────────────────────────────────────────────────────
+# Ansible
+*.retry
+.vault_pass
 .molecule/
-.pytest_cache/
-__pycache__/
-*.pyc
+ansible_collections/
 
-# ─── Python (molecule/ansible deps) ───────────────────────────────────────────
+# Python (Ansible modules, Molecule, linting helpers)
+__pycache__/
+*.py[cod]
 .venv/
 venv/
 
-# ─── Editors / OS ─────────────────────────────────────────────────────────────
-.vscode/
+# Editor and OS junk
 .idea/
+.vscode/
 *.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
-
-# ─── Build staging area (used by repo maintainers) ────────────────────────────
-staging/
