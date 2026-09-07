@@ -21,13 +21,17 @@ terraform.rc
 *.vault_pass
 ansible.log
 
+# Dynamic-inventory cache (if you enable caching in inventory/aws_ec2.yml)
+**/inventory_cache/
+**/.ansible_cache/
+
 # ─── Molecule / tests ─────────────────────────────────────────────────────────
 .molecule/
 .pytest_cache/
 __pycache__/
 *.pyc
 
-# ─── Python (molecule/ansible deps) ───────────────────────────────────────────
+# ─── Python (ansible/boto3 deps) ──────────────────────────────────────────────
 .venv/
 venv/
 
@@ -38,5 +42,7 @@ venv/
 .DS_Store
 Thumbs.db
 
-# ─── Build staging area (used by repo maintainers) ────────────────────────────
-staging/
+# ─── SSH keys (NEVER commit private keys — reference paths via variables) ────
+*.pem
+id_rsa
+id_ed25519
