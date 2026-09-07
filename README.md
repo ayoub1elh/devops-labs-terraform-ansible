@@ -1,128 +1,178 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 09 — Ansible Basics: Inventory, Config, and Ad-Hoc Commands
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+This is the first lab in the Ansible track. Before writing playbooks, you need to understand the three pieces Ansible always uses: an **inventory** (the list of machines you manage), a **configuration file** (`ansible.cfg`, which controls how Ansible behaves), and **ad-hoc commands** (one-off module invocations from the shell — the same mechanism playbooks use under the hood). Everything here runs against `localhost`, so you need nothing more than Ansible installed. No cloud resources, no cost, no cleanup of real infrastructure.
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+## Learning Objectives
 
-## How to Use This Repository
+- Explain what an Ansible inventory is and group hosts into `[webservers]` and `[dbservers]`.
+- Understand how `ansible.cfg` is discovered and which settings matter for a local lab.
+- Run ad-hoc commands against all hosts, one group, and filtered facts.
+- Read `ansible-doc` to discover module options without leaving the terminal.
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
+## Architecture
 
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+This lab creates **no infrastructure** — it exercises Ansible's local connection against two logical hosts that both map to your own machine:
 
 ```mermaid
 flowchart LR
-    subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+    subgraph YourMachine["Your machine (control node = managed node)"]
+        A["ansible CLI<br/>(ad-hoc commands)"]
+        CFG["ansible.cfg<br/>(inventory path, forks,<br/>host_key_checking, interpreter_python)"]
+        INV["inventory/hosts.ini<br/>[webservers] node-web-1<br/>[dbservers] node-db-1"]
+        H1["node-web-1<br/>ansible_host=127.0.0.1<br/>ansible_connection=local"]
+        H2["node-db-1<br/>ansible_host=127.0.0.1<br/>ansible_connection=local"]
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
-    end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
-    end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+    A --> CFG
+    A --> INV
+    INV --> H1
+    INV --> H2
 ```
+
+> In a real deployment `node-web-1` and `node-db-1` would be two separate remote servers reached over SSH. We label them distinctly here so group targeting behaves exactly as it would in production.
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+- **Ansible core** — any recent version. Verify with:
+  ```bash
+  ansible --version
+  ```
+  You want at least Ansible core 2.14+ (shipped with `ansible` 7+). Install options:
+  - `python3 -m pip install ansible` (a `pipx install ansible` keeps it isolated), or
+  - `sudo apt install ansible` on Debian/Ubuntu, `brew install ansible` on macOS.
+  On **Windows**, Ansible cannot be a control node directly — use WSL2, the Git Bash terminal is **not** supported for running Ansible. This lab assumes Linux/macOS/WSL.
+- **Python 3** — 3.9 or newer (Ansible's dependency).
+- **Make** (optional) — only needed if you want to use the `Makefile` shortcuts.
+- No cloud accounts, no environment variables, no secrets.
 
-## Cost Warning
+## Step-by-Step Instructions
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+1. Clone (or cd into) this lab directory:
+   ```bash
+   cd staging/lab-09-ansible-basics
+   ```
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+2. (Optional) Confirm Ansible can see your config and inventory:
+   ```bash
+   ansible --version | head -1
+   ansible-inventory --list
+   ```
+   Expected output (trimmed): a JSON structure with `"webservers"` and `"dbservers"` groups, each containing one host with `ansible_host: 127.0.0.1`.
 
-## Contributing
+3. **Ping everything.** The `ping` module is not ICMP — it verifies Ansible can log in and run Python on the target:
+   ```bash
+   ansible all -m ping
+   ```
+   Expected output:
+   ```
+   node-web-1 | SUCCESS => {
+       "changed": false,
+       "ping": "pong"
+   }
+   node-db-1 | SUCCESS => {
+       "changed": false,
+       "ping": "pong"
+   }
+   ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+4. **Ping one group only.** This is the whole point of groups — target a tier without naming hosts:
+   ```bash
+   ansible webservers -m ping
+   ```
+   Expected output: only `node-web-1` appears this time.
 
-## License
+5. **Gather facts.** The `setup` module collects hundreds of facts (OS, memory, network…) about each host:
+   ```bash
+   ansible webservers -m setup
+   ```
+   Expected output: a very long JSON blob starting with `"ansible_all_ipv4_addresses"` etc. — that volume is normal.
 
-MIT — use it, fork it, teach with it.
+6. **Filter the facts** — two ways, depending on your shell:
+   ```bash
+   # Option A: ask the module to filter (works everywhere, recommended)
+   ansible webservers -m setup -a 'filter=ansible_distribution*'
+
+   # Option B: grep the output (works in Git Bash / Linux / macOS)
+   ansible webservers -m setup | grep ansible_hostname
+   ```
+   Expected output for option A (your values will vary):
+   ```
+   node-web-1 | SUCCESS => {
+       "ansible_facts": {
+           "ansible_distribution": "Ubuntu",
+           "ansible_distribution_file_parsed": true,
+           "ansible_distribution_file_path": "/etc/os-release",
+           "ansible_distribution_file_variety": "Debian",
+           "ansible_distribution_major_version": "24",
+           "ansible_distribution_release": "noble",
+           "ansible_distribution_version": "24.04"
+       },
+       "changed": false
+   }
+   ```
+
+7. **Run an arbitrary shell command on all hosts:**
+   ```bash
+   ansible all -m shell -a "uptime"
+   ```
+   Expected output (uptime strings vary):
+   ```
+   node-db-1 | CHANGED | rc=0 >>
+    14:32:11 up 3 days,  2:10,  1 user,  load average: 0.42, 0.30, 0.27
+
+   node-web-1 | CHANGED | rc=0 >>
+    14:32:11 up 3 days,  2:10,  1 user,  load average: 0.42, 0.30, 0.27
+   ```
+   (Identical load on both is expected — they are the same machine!)
+
+8. **Tip — read the docs from the terminal.** Before using any module, check its options and examples:
+   ```bash
+   ansible-doc shell
+   ansible-doc -l | grep -i file   # discover modules by keyword
+   ```
+
+9. (Optional) Use the `Makefile` shortcuts:
+   ```bash
+   make setup   # verify prerequisites
+   make ping    # ansible all -m ping
+   make deploy  # prints guidance (no playbooks exist yet in this lab)
+   ```
+
+## How Do I Know This Worked?
+
+- `ansible all -m ping` returns `"ping": "pong"` for **both** `node-web-1` and `node-db-1`.
+- `ansible webservers -m ping` returns success **only** for `node-web-1` (proves group targeting works).
+- `ansible-inventory --list` shows both groups with exactly one host each.
+- `ansible all -m shell -a "uptime"` exits with code `0` (check `echo $?` right after) and shows output from both hosts.
+
+## Cleanup
+
+Nothing is created on disk or in the cloud, so cleanup is simply leaving the directory. If you installed Ansible only for this lab and want to remove it:
+
+```bash
+pipx uninstall ansible        # if installed with pipx
+# or
+python3 -m pip uninstall ansible
+```
+
+No Terraform state, no cloud resources, no background processes exist.
+
+## Troubleshooting
+
+1. **`ansible: command not found`**
+   - **Symptom:** Running any `ansible …` command fails immediately.
+   - **Cause:** Ansible is not installed, or its install location (e.g. `~/.local/bin`) is not on your `PATH`.
+   - **Fix:** Install per Prerequisites, then re-open your shell or run `export PATH="$HOME/.local/bin:$PATH"`. On Windows, use WSL2 — Ansible is not supported as a Windows control node.
+
+2. **`ERROR! Attempting to decrypt but no vault secrets found` or `Unable to parse inventory/hosts.ini`**
+   - **Symptom:** Inventory commands fail with a parse error naming a line number.
+   - **Cause:** A typo in `inventory/hosts.ini` — most commonly a host line accidentally indented, a missing `=`, or a stray `:` where an `=` belongs.
+   - **Fix:** Check the reported line number. Group headers must be `[name]` on column 0, and host variables use `key=value` separated by spaces. Re-run `ansible-inventory --list` after fixing.
+
+3. **Ping succeeds for one group but `ansible all …` only hits one host (or warns "provided hosts list is empty")**
+   - **Symptom:** `ansible all -m ping` shows a single host, or warns about an empty list.
+   - **Cause:** `ansible.cfg` in the *current directory* isn't being read (Ansible only auto-reads `ansible.cfg` from the cwd, `$ANSIBLE_CONFIG`, or `~/.ansible.cfg`), so `inventory` points elsewhere or defaults to `/etc/ansible/hosts`.
+   - **Fix:** Run commands from the lab directory, or set `export ANSIBLE_CONFIG=ansible.cfg`. Verify with `ansible-inventory --graph`, which should print both groups.
+
+## Free Tier Notes
+
+This lab uses **no cloud resources** — there is nothing to bill. Everything executes on your own machine via `ansible_connection=local`. (Free-tier terms at AWS/Terraform Cloud change over time anyway; whenever a later lab *does* create cloud resources, always run its `make destroy` / cleanup steps and double-check the billing console afterwards.)
