@@ -1,128 +1,304 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 03 — Modules
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+Lab 02 ended with a root module full of variables, locals, and outputs. That
+works, but copy-pasting resource blocks every time you want a second container
+does not scale. In this lab you refactor that code into a **reusable local
+module** called `container-service` and call it **twice** — a **blue** and a
+**green** Nginx container — with a single `for_each` over a map. Along the way
+you learn how module inputs/outputs work and how to read the output of one
+specific module instance (e.g. `module.container_service["blue"].name`).
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+Everything runs against a **local Docker daemon**, so there are **no cloud
+costs** and nothing to sign up for beyond a GitHub account.
 
-## How to Use This Repository
+## Learning Objectives
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
+- Explain what a Terraform module is and why you would extract one.
+- Move resources into `modules/<name>/` and wire them up with input variables and outputs.
+- Call a module multiple times with `for_each` over a map.
+- Access per-instance module outputs with the `module.<name>["<key>"].<output>` syntax.
+- Read module output maps with `for` expressions in root outputs.
+- Verify `terraform fmt`, `terraform validate`, and `terraform plan` in GitHub Actions CI.
 
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+    subgraph Root["Root module (this directory)"]
+        MAIN[main.tf<br/>for_each over local.containers]
+        VAR[variables.tf<br/>image, internal_port]
+        OUT[outputs.tf<br/>per-instance output maps]
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
+    subgraph Module["modules/container-service"]
+        MI[main.tf<br/>docker_image + docker_container]
+        VI[variables.tf<br/>name, image, internal_port, host_port]
+        OI[outputs.tf<br/>name, endpoint, ...]
     end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
+    subgraph Docker["Local Docker host"]
+        B["lab03-blue<br/>host port 8080"]
+        G["lab03-green<br/>host port 8081"]
     end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+    MAIN -->|instantiated twice| MI
+    VAR --> MI
+    MI --> OI --> OUT
+    MI --> B
+    MI --> G
+    U1[Browser :8080] --> B
+    U2[Browser :8081] --> G
 ```
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+Exact tools and versions (run `make setup` to check your machine):
 
-## Cost Warning
+| Tool       | Version           | Purpose                              |
+|------------|-------------------|--------------------------------------|
+| Git        | any recent        | Clone/checkout the lab branch        |
+| Terraform  | >= 1.5.0          | Provisions the containers            |
+| Docker     | >= 20.10          | Runs the containers                  |
+| GNU Make   | any recent        | Convenience targets                  |
+| curl       | any recent        | Verifying the containers respond     |
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+Free accounts needed: **none** — this lab is 100% local. (Later labs use AWS
+and Terraform Cloud free tiers; each of those READMEs says exactly what to
+create.)
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+Required environment variables: **none**. No credentials are used anywhere in
+this lab — the Docker provider talks to your local Docker daemon socket.
 
-## Contributing
+## Step-by-Step Instructions
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+1. **Check out the lab branch** (or open this repo in GitHub Codespaces and
+   select the branch):
 
-## License
+   ```bash
+   git checkout lab-03-modules
+   ```
 
-MIT — use it, fork it, teach with it.
+2. **Verify prerequisites**:
+
+   ```bash
+   make setup
+   ```
+
+   Expected output (versions vary):
+
+   ```
+   Terraform v1.9.x
+   Docker version 24.x.x ...
+   GNU Make 4.x
+   ```
+
+3. **Look at the module first.** Open `modules/container-service/`. Notice it
+   is a mini root module: it has its own `main.tf`, `variables.tf`, and
+   `outputs.tf`, and it knows nothing about "blue" or "green" — it just builds
+   *one* container from whatever image/ports you pass in.
+
+4. **Read the root `main.tf`.** The interesting part is:
+
+   ```hcl
+   locals {
+     containers = {
+       blue  = { host_port = 8080 },
+       green = { host_port = 8081 }
+     }
+   }
+
+   module "container_service" {
+     source   = "./modules/container-service"
+     for_each = local.containers
+
+     name          = "lab03-${each.key}"
+     image         = var.image
+     internal_port = var.internal_port
+     host_port     = each.value.host_port
+   }
+   ```
+
+   Terraform instantiates the module once per map entry. Inside the module,
+   `each.key` is `"blue"` or `"green"` and `each.value` is the object
+   containing that instance's `host_port`.
+
+5. **Format and lint**:
+
+   ```bash
+   make lint
+   ```
+
+   Expected output:
+
+   ```
+   terraform fmt -check -recursive
+   # (no output = everything already formatted)
+   ```
+
+6. **Initialize and validate** (this downloads the Docker provider):
+
+   ```bash
+   make test
+   ```
+
+   Expected output (tail):
+
+   ```
+   Initializing modules...
+   ...
+   Terraform has been successfully initialized!
+   ...
+   Success! The configuration is valid.
+   ```
+
+7. **Preview the plan**:
+
+   ```bash
+   terraform plan
+   ```
+
+   Expected output (abridged) — note the `module.container_service["blue"]`
+   and `module.container_service["green"]` addresses:
+
+   ```
+   Terraform will perform the following actions:
+     # module.container_service["blue"].docker_container.this will be created
+     # module.container_service["blue"].docker_image.this will be created
+     # module.container_service["green"].docker_container.this will be created
+     # module.container_service["green"].docker_image.this will be created
+   Plan: 4 to add, 0 to change, 0 to destroy.
+   ```
+
+8. **Deploy**:
+
+   ```bash
+   make deploy
+   ```
+
+   Type `yes` when prompted. Expected output ends with something like:
+
+   ```
+   Apply complete! Resources: 4 added, 0 changed, 0 destroyed.
+
+   Outputs:
+
+   blue_container_name = "lab03-blue"
+   container_names = {
+     "blue" = "lab03-blue"
+     "green" = "lab03-green"
+   }
+   endpoints = {
+     "blue" = "http://localhost:8080"
+     "green" = "http://localhost:8081"
+   }
+   ```
+
+9. **See how per-instance outputs work**. Run:
+
+   ```bash
+   terraform output blue_container_name
+   ```
+
+   Expected output: `"lab03-blue"` — this value came from
+   `module.container_service["blue"].name`, demonstrating the instance-access
+   syntax.
+
+## How Do I Know This Worked?
+
+1. **Both containers exist and are running**:
+
+   ```bash
+   docker ps --filter "name=lab03-" --format "table {{.Names}}\t{{.Ports}}"
+   ```
+
+   Expected output (image column trimmed for readability):
+
+   ```
+   NAMES        PORTS
+   lab03-blue   0.0.0.0:8080->80/tcp, ...
+   lab03-green  0.0.0.0:8081->80/tcp, ...
+   ```
+
+2. **Both endpoints serve Nginx**:
+
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080
+   curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8081
+   ```
+
+   Each command should print `200`.
+
+3. **Outputs match the two instances**:
+
+   ```bash
+   terraform output endpoints
+   ```
+
+   Expected output:
+
+   ```
+   endpoints = {
+     "blue" = "http://localhost:8080"
+     "green" = "http://localhost:8081"
+   }
+   ```
+
+## Cleanup
+
+Tear everything down (removes both containers and the downloaded images):
+
+```bash
+make destroy
+```
+
+Type `yes` when prompted. Expected final line:
+
+```
+Destroy complete! Resources: 4 destroyed.
+```
+
+Confirm nothing is left:
+
+```bash
+docker ps -a --filter "name=lab03-"
+```
+
+Expected output: an empty table (just the header row). Then optionally run
+`make clean` to remove the `.terraform/` directory and the local state files.
+
+## Troubleshooting
+
+**1. Error: `Error response from daemon: ... port is already allocated`**
+
+- **Symptom:** `terraform apply` fails when creating a container, mentioning
+  port `8080` or `8081`.
+- **Cause:** Something else on your machine is already bound to that host port
+  (a leftover container, a local dev server, or a previous lab).
+- **Fix:** Find the culprit with `docker ps` (or `netstat -ano | findstr 8080`
+  on Windows) and either stop it or change the `host_port` value in the
+  `local.containers` map in `main.tf`, then run `make deploy` again.
+
+**2. Error: `Invalid index: the given key does not identify an element in this collection`**
+
+- **Symptom:** `terraform plan` or `terraform output` fails with an error
+  pointing at `module.container_service["blue"]`.
+- **Cause:** You renamed a key in the `local.containers` map (e.g. `"blue"`
+  to `"primary"`) but an output or reference still uses the old key.
+- **Fix:** Search for the old key (`grep -r '"blue"' .` on Linux/macOS or
+  `findstr /s /c:"blue" *.tf` on Windows) and update the reference, or rename
+  the key back. With `for_each`, keys must match exactly.
+
+**3. Error: `Error: Inconsistent dependency lock file` or `Module not installed`**
+
+- **Symptom:** Commands fail claiming modules/providers are missing after you
+  cloned the repo or switched branches.
+- **Cause:** `terraform init` has not been run in this working directory, or
+  it was run before `modules/container-service` existed.
+- **Fix:** Run `terraform init` (or simply `make test`, which runs
+  `init -upgrade` followed by `validate`). Never commit `.terraform/` — it is
+  gitignored and rebuilt by init.
+
+## Free Tier Notes
+
+This lab creates **only local Docker resources** — there are no cloud
+resources, no AWS costs, and no Terraform Cloud usage. Still, keep the general
+habits from the other labs: free tiers (AWS, Terraform Cloud, GitHub) change
+over time, so always run `make destroy` when you finish a lab and check the
+billing console of any cloud account you use elsewhere in this repository.
