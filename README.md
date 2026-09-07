@@ -1,128 +1,235 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 13 — Terraform → Ansible Integration
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+So far you've used Terraform to **build** infrastructure and Ansible to **configure** machines — but you've always copied IP addresses between the two by hand. In this lab you close that gap: Terraform creates a free-tier AWS web stack and then *writes the Ansible inventory file itself* via a `local_file` resource, so Ansible always knows exactly which host to configure. This static-inventory handoff is the simplest of several integration patterns (Lab 14 replaces it with a dynamic inventory plugin).
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+## Learning Objectives
 
-## How to Use This Repository
+- Explain the division of labor: **Terraform provisions, Ansible configures**.
+- Use the `hashicorp/local` provider and its `local_file` resource to render a file from Terraform values.
+- Generate a ready-to-use Ansible inventory (`[webservers]` group, `ansible_user`, SSH hints) from Terraform outputs — no manual IP copying.
+- Write an OS-family-agnostic playbook with `ansible.builtin.apt` / `ansible.builtin.yum` and `when: ansible_facts['os_family'] == ...` conditionals.
+- Deploy a custom MOTD with `ansible.builtin.copy` and verify configuration over both HTTP and SSH.
+- Chain the two tools in one `make all` run with a guard that fails cleanly when the inventory is missing.
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
-
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
 flowchart LR
     subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+        TF["terraform apply<br/>(terraform/)"]
+        INV["aws_hosts.ini<br/>local_file resource<br/>(ansible/inventory/)"]
+        AP["ansible-playbook<br/>(ansible/site.yml)"]
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
+    subgraph AWS["AWS Free Tier"]
+        VPC["VPC + Public Subnet"]
+        SG["Security Group<br/>22 / 80"]
+        EC2["t2.micro Ubuntu EC2<br/>user_data: installs python3"]
     end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
-    end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+
+    TF -->|creates| VPC
+    TF -->|creates| SG
+    TF -->|creates| EC2
+    TF -->|renders public IP into| INV
+    AP -->|reads inventory| INV
+    AP -->|"SSH :22 — installs Nginx,<br/>writes /etc/motd"| EC2
+    USER(["curl http://&lt;ip&gt;"]) -->|HTTP :80| EC2
 ```
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+**Tools (exact versions):**
 
-## Cost Warning
+| Tool | Version | Check with |
+|------|---------|------------|
+| Terraform | >= 1.5.0 | `terraform version` |
+| AWS provider | ~> 5.0 (installed automatically by `terraform init`) | — |
+| local provider | ~> 2.5 (installed automatically by `terraform init`) | — |
+| Ansible core | >= 2.14 | `ansible --version` |
+| AWS CLI | >= 2.x (only needed to create the key pair) | `aws --version` |
+| make | any (Git Bash / GNU Make) | `make --version` |
+| curl | any | `curl --version` |
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+**Free accounts:**
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+- An AWS account (free tier). You will stay within the 12-month-free-tier `t2.micro` allowance (750 hours/month).
+- An IAM user with `AmazonEC2FullAccess` (or equivalent) **or** the keys from your admin user — used only locally, never committed. (CI-based AWS auth with OIDC is covered in Lab 08 and Lab 17.)
 
-## Contributing
+**Required environment variables** (Terraform reads them automatically — never put them in code):
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+```bash
+export AWS_ACCESS_KEY_ID="AKIA..."        # your IAM user's access key ID
+export AWS_SECRET_ACCESS_KEY="wJalr..."   # the matching secret access key
+export AWS_DEFAULT_REGION="us-east-1"     # optional; the lab defaults to us-east-1
+```
 
-## License
+If you prefer a shared credentials file, `~/.aws/credentials` works too — Terraform picks it up with no exports.
 
-MIT — use it, fork it, teach with it.
+**AWS key pair (one-time setup):** the instance needs an EC2 key pair for SSH. Either create it in the console (*EC2 → Network & Security → Key Pairs → Create key pair*, name it `lab13-key`, download the `.pem`), or:
+
+```bash
+aws ec2 create-key-pair --key-name lab13-key \
+  --query 'KeyMaterial' --output text > ~/.ssh/lab13-key.pem
+chmod 600 ~/.ssh/lab13-key.pem
+```
+
+> The lab's example commands use `~/.ssh/id_rsa` as the private key (per the task flow). If your key is `~/.ssh/lab13-key.pem`, just replace the path — or use `make all KEY=~/.ssh/lab13-key.pem`. The private key **never** appears in Terraform or the inventory (the inventory only contains a commented-out hint).
+
+## Step-by-Step Instructions
+
+1. **Clone/check out this branch and enter the lab directory** (the files listed below live at the repo root of the `lab-13-tf-ansible-integration` branch):
+
+   ```bash
+   git checkout lab-13-tf-ansible-integration
+   ```
+
+2. **Configure your variables.** Copy the example and set your AWS key pair name:
+
+   ```bash
+   cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+   # edit terraform.tfvars: set key_name = "lab13-key" (the pair you created above)
+   ```
+
+3. **Export your AWS credentials** (see Prerequisites) and verify:
+
+   ```bash
+   echo "Key id starts with: ${AWS_ACCESS_KEY_ID:0:4}"   # should print AKIA (or ASIA)
+   ```
+
+4. **Provision the infrastructure.** Terraform creates the VPC, subnet, security group, EC2 instance — and then writes the Ansible inventory:
+
+   ```bash
+   cd terraform
+   terraform init
+   terraform apply
+   ```
+
+   Type `yes` when prompted. Expected tail of the output:
+
+   ```
+   Apply complete! Resources: 8 added, 0 changed, 0 destroyed.
+
+   Outputs:
+
+   curl_check_command = "curl http://54.210.123.45"
+   inventory_file = "../ansible/inventory/aws_hosts.ini"
+   ssh_motd_command = "ssh -i ~/.ssh/id_rsa ubuntu@54.210.123.45"
+   web_public_ip = "54.210.123.45"
+   ```
+
+5. **Confirm the inventory was generated** — this is the handoff artifact:
+
+   ```bash
+   cd ..
+   cat ansible/inventory/aws_hosts.ini
+   ```
+
+   Expected content (with your real IP):
+
+   ```ini
+   # GENERATED BY TERRAFORM — do not edit by hand.
+   ...
+   [webservers]
+   54.210.123.45 ansible_user=ubuntu
+
+   [webservers:vars]
+   # ansible_ssh_private_key_file = ~/.ssh/id_rsa
+   ansible_ssh_common_args = -o StrictHostKeyChecking=accept-new
+   ```
+
+6. **(Optional but recommended) Check SSH connectivity first:**
+
+   ```bash
+   ansible -i ansible/inventory/aws_hosts.ini webservers \
+     -m ansible.builtin.ping -u ubuntu --private-key ~/.ssh/id_rsa
+   # Expected: "54.210.123.45 | SUCCESS => { \"ping\": \"pong\" }"
+   ```
+
+7. **Configure the host with Ansible** — installs Nginx and writes the custom MOTD:
+
+   ```bash
+   ansible-playbook -i ansible/inventory/aws_hosts.ini ansible/site.yml \
+     -u ubuntu --private-key ~/.ssh/id_rsa
+   ```
+
+   Expected tail:
+
+   ```
+   TASK [Deploy a custom MOTD] ****************************************************
+   changed: [54.210.123.45]
+
+   PLAY RECAP *********************************************************************
+   54.210.123.45              : ok=4    changed=3    unreachable=0    failed=0    skipped=0
+   ```
+
+   Run the same command a second time and notice `changed=0` — the playbook is idempotent.
+
+8. **Or do steps 4–7 in one shot** with the lab's `all` target (it applies Terraform, then refuses to run Ansible unless the inventory file exists):
+
+   ```bash
+   make all            # add KEY=~/.ssh/lab13-key.pem if your key isn't id_rsa
+   ```
+
+## How Do I Know This Worked?
+
+1. **HTTP check** — Nginx serves the default welcome page:
+
+   ```bash
+   curl http://$(cd terraform && terraform output -raw web_public_ip)
+   ```
+
+   Success = HTML containing `<title>Welcome to nginx!</title>`.
+
+2. **SSH MOTD check** — the MOTD Ansible deployed is printed right after login:
+
+   ```bash
+   ssh -i ~/.ssh/id_rsa ubuntu@$(cd terraform && terraform output -raw web_public_ip)
+   ```
+
+   Success = a banner reading **"Managed by Ansible - created by Terraform (Lab 13)"** appears before the shell prompt; `exit` returns you to your machine.
+
+3. **Idempotence check** — re-running the playbook changes nothing:
+
+   ```bash
+   ansible-playbook -i ansible/inventory/aws_hosts.ini ansible/site.yml \
+     -u ubuntu --private-key ~/.ssh/id_rsa | tail -n 3
+   ```
+
+   Success = `changed=0` in the `PLAY RECAP` line.
+
+## Cleanup
+
+```bash
+cd terraform
+terraform destroy          # type "yes"; removes the EC2, SG, subnet, VPC, IGW...
+```
+
+Two notes about the inventory file:
+
+- Because `aws_hosts.ini` is a **Terraform-managed resource**, `terraform destroy` also deletes it — nothing stale is left behind.
+- On every future `terraform apply` the file is **recreated from scratch** with the current public IP, so if you re-provision later, always use the freshly generated inventory rather than an old copy.
+
+Optional tidy-up: delete the key pair in the EC2 console if you don't need it, then check the AWS Billing console (see Free Tier Notes).
+
+## Troubleshooting
+
+1. **`ansible-playbook` fails with `UNREACHABLE! ... Permission denied (publickey)`**
+   - **Symptom:** the ping or playbook step cannot authenticate; the host is reachable but SSH rejects the key.
+   - **Cause:** the `--private-key` file doesn't match the AWS key pair named in `key_name` (or its permissions are too open, e.g. a `.pem` left at `0644`).
+   - **Fix:** verify `terraform.tfvars` has the right `key_name`, point `--private-key` at the matching private key, and run `chmod 600` on it. Retest with `make ping`.
+
+2. **`ERROR: ansible/inventory/aws_hosts.ini not found` (from `make all`)**
+   - **Symptom:** the `all` target stops after (or before) the playbook with the guard message.
+   - **Cause:** `terraform apply` didn't finish successfully, or you ran the playbook from a different working directory where the relative path doesn't resolve.
+   - **Fix:** re-run `terraform -chdir=terraform apply` and check for errors; confirm the file exists with `cat ansible/inventory/aws_hosts.ini`; always run `make` from the lab root directory.
+
+3. **`UNREACHABLE! ... Failed to connect to the host via ssh: Connection timed out`**
+   - **Symptom:** SSH hangs for ~a minute then times out.
+   - **Cause:** either the instance hasn't finished booting and running `user_data` (which installs `python3`), or the security group doesn't allow your IP on port 22 (check `ssh_allowed_cidr` in `terraform.tfvars` if you restricted it), or you just ran `terraform destroy` and the inventory holds a dead IP.
+   - **Fix:** wait 1–2 minutes after apply and retry; run `aws ec2 describe-security-groups` to confirm an ingress rule on port 22 covering your IP; if you destroyed/re-applied, regenerate the inventory with `terraform -chdir=terraform apply` (it is recreated every apply).
+
+## Free Tier Notes
+
+- This lab creates exactly **one `t2.micro`** EC2 instance, a VPC, a subnet, an internet gateway, a route table, and a security group. The `t2.micro` is covered by the AWS 12-month free tier (750 hours/month — running **one** instance 24/7 fits), and VPC/subnet/IGW/route table/security group are **free** (only data transfer and public IPv4 charges may apply; the tiny traffic from `curl` is negligible).
+- **Free tiers change.** AWS can and does revise free-tier terms — always (1) run `terraform destroy` when done, (2) check the **Billing** dashboard (and set a billing alarm / free-tier alert in the console) after the lab.
+- If your 12-month free tier has already expired, an hour of `t2.micro` costs roughly a cent — still trivial, but destroy promptly and verify in Billing.
+- Nothing in this lab uses Terraform Cloud or other paid services; state stays local.
