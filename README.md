@@ -24,6 +24,8 @@ Each lab lives on its own **Git branch**. Every branch is self-contained: it has
 
 > **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
 
+> **New here?** [LAB-GUIDE.md](LAB-GUIDE.md) has the exact checkout → commit → push commands for every lab, ready to copy-paste. Python tooling is pinned in [requirements.txt](requirements.txt).
+
 ## Learning Roadmap
 
 ### Phase 1 — Terraform Fundamentals
