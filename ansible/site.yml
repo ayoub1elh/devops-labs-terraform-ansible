@@ -1,0 +1,72 @@
+---
+# site.yml — The capstone playbook. Targets every EC2 instance the dynamic
+# inventory returns (tag:Environment=dev), then:
+#   1. installs Nginx,
+#   2. deploys a custom index page (visible proof Ansible ran),
+#   3. deploys a /health endpoint (used by the CI smoke test),
+#   4. writes a custom MOTD.
+# No Ansible Vault is needed here — nothing secret is stored in the play.
+# If you later add secrets, see README.md "Secrets pattern" for the
+# --vault-password-file / GITHUB Secrets approach.
+
+- name: Configure web servers
+  hosts: tag_Environment_dev
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install Nginx
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+
+    - name: Deploy custom index page
+      ansible.builtin.copy:
+        dest: /var/www/html/index.html
+        mode: "0644"
+        content: |
+          <!doctype html>
+          <html>
+            <head><title>Lab 17 Capstone</title></head>
+            <body>
+              <h1>Hello from the Lab 17 full DevOps pipeline!</h1>
+              <p>Provisioned by Terraform, configured by Ansible, verified by GitHub Actions.</p>
+              <p>Host: {{ ansible_hostname }}</p>
+            </body>
+          </html>
+      notify: Restart nginx
+
+    - name: Deploy /health endpoint for the smoke test
+      ansible.builtin.copy:
+        dest: /var/www/html/health
+        mode: "0644"
+        content: |
+          ok
+      notify: Restart nginx
+
+    - name: Configure custom MOTD
+      ansible.builtin.copy:
+        dest: /etc/motd
+        mode: "0644"
+        content: |
+          ------------------------------------------------------------
+           Lab 17 capstone server — managed by Terraform + Ansible.
+           Touch nothing by hand; change the code, not the machine.
+          ------------------------------------------------------------
+
+    - name: Ensure Nginx is enabled and running
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Restart nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted

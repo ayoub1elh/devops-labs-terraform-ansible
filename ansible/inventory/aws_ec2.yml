@@ -1,0 +1,32 @@
+---
+# aws_ec2.yml — Dynamic inventory plugin configuration (amazon.aws collection).
+# Instead of a static list of IPs, Ansible asks the AWS API at runtime for all
+# *running* EC2 instances carrying the Environment=dev tag created in Lab 14.
+# Authentication uses the usual AWS credential chain (env vars, ~/.aws, or the
+# OIDC-injected credentials in GitHub Actions).
+
+plugin: amazon.aws.aws_ec2
+
+regions:
+  - us-east-1 # must match var.aws_region in terraform/variables.tf
+
+# Only pick up running instances tagged Environment=dev — exactly the host
+# Terraform creates. This makes the inventory self-limiting and safe.
+filters:
+  tag:Environment: dev
+  instance-state-name: running
+
+# Address hosts by public IP so the playbooks/URLs work from CI and laptops.
+hostnames:
+  - ip-address
+
+# Extra host variables composed onto every host. ansible_user is the Ubuntu
+# AMI's default account; the private key comes from ansible.cfg / ssh-agent.
+compose:
+  ansible_user: "'ubuntu'"
+
+# Optional grouping by tag, e.g. a host tagged Role=web lands in the group
+# tag_Role_web (the aws_ec2 plugin auto-creates tag_Environment_* groups too).
+keyed_groups:
+  - key: tags.Role
+    prefix: role
