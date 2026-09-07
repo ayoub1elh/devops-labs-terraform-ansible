@@ -1,0 +1,24 @@
+# ------------------------------------------------------------------------------
+# terraform.tfvars.example — template for your terraform.tfvars.
+#
+# Copy this file to terraform.tfvars and fill in your values:
+#     cp terraform.tfvars.example terraform.tfvars
+#
+# terraform.tfvars is gitignored (see ../.gitignore) — it is safe to keep real
+# values there, but NEVER commit it. The example file contains no secrets.
+#
+# NOTE: `key_name` refers to an AWS key pair you must create first (see
+# variables.tf or the README). The matching PRIVATE key stays on your machine
+# and is only referenced by Ansible's --private-key flag.
+# ------------------------------------------------------------------------------
+
+aws_region = "us-east-1"
+
+# Name of the existing AWS EC2 key pair for SSH access:
+key_name = "lab13-key"
+
+# Restrict SSH to your own IP for better security (find yours with
+# `curl -s https://checkip.amazonaws.com`):
+# ssh_allowed_cidr = "203.0.113.10/32"
+
+# instance_type = "t2.micro"  # default is already free-tier eligible

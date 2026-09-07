@@ -1,0 +1,67 @@
+---
+# ------------------------------------------------------------------------------
+# site.yml — Lab 13: configure the EC2 instance that Terraform created.
+#
+# This playbook is the SECOND half of the lab. Terraform already:
+#   1. created the VPC/subnet/security group/EC2 instance, and
+#   2. wrote ansible/inventory/aws_hosts.ini containing the instance's public IP.
+#
+# Now Ansible takes over: it installs Nginx (using OS-family conditionals so the
+# same playbook also works on RedHat-family hosts) and drops a custom MOTD.
+#
+# Run it with:
+#   ansible-playbook -i ansible/inventory/aws_hosts.ini ansible/site.yml \
+#     -u ubuntu --private-key ~/.ssh/id_rsa
+#
+# The playbook is idempotent: running it again changes nothing.
+# ------------------------------------------------------------------------------
+
+- name: Configure web servers created by Terraform
+  hosts: webservers
+  become: true              # we install packages and write /etc/motd as root
+  gather_facts: true        # needed for the ansible_facts['os_family'] checks
+
+  tasks:
+    # Debian/Ubuntu path: use apt. `update_cache` refreshes package lists so
+    # `state: present` finds the package on a brand-new instance.
+    - name: Install Nginx on Debian-family hosts
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: true
+      when: ansible_facts['os_family'] == 'Debian'
+
+    # RedHat/CentOS/Amazon Linux path: yum (dnf-compatible on modern releases).
+    # The lab creates Ubuntu hosts, but this keeps the playbook reusable.
+    - name: Install Nginx on RedHat-family hosts
+      ansible.builtin.yum:
+        name: nginx
+        state: present
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    # MOTD (message of the day) is printed on every SSH login — an easy,
+    # visible proof that Ansible configured the machine.
+    - name: Deploy a custom MOTD
+      ansible.builtin.copy:
+        dest: /etc/motd
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          ============================================================
+              Managed by Ansible  -  created by Terraform (Lab 13)
+          ------------------------------------------------------------
+          This host was provisioned by Terraform and configured by
+          Ansible. If you change things by hand, re-run the playbook:
+
+              ansible-playbook -i ansible/inventory/aws_hosts.ini \
+                  ansible/site.yml -u ubuntu --private-key ~/.ssh/id_rsa
+          ============================================================
+
+    # Ensure the service is running now and starts on boot. On the first run
+    # this starts Nginx; on later runs it is a harmless no-op (idempotence).
+    - name: Ensure Nginx is running and enabled at boot
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
