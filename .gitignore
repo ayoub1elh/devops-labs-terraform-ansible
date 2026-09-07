@@ -1,42 +1,29 @@
-# ─── Terraform ────────────────────────────────────────────────────────────────
-# Local .terraform directories and lock files (per-branch/module)
-**/.terraform/*
-**/.terraform.lock.hcl
+# .gitignore — Lab 03 (Terraform)
+
+# Terraform working directory and lock file (rebuilt by `terraform init`)
+.terraform/
+.terraform.lock.hcl
+
+# Local state — never commit real state files
 *.tfstate
 *.tfstate.*
-crash.log
-crash.*.log
+
+# Variable value files may contain secrets; keep an example instead
 *.tfvars
 !*.tfvars.example
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-.terraformrc
-terraform.rc
 
-# ─── Ansible ──────────────────────────────────────────────────────────────────
-*.retry                # ansible-playbook retry files
-.vault_pass            # never commit vault passwords
-*.vault_pass
-ansible.log
+# Crash logs and saved plans
+crash.log
+crash.*.log
+tfplan
 
-# ─── Molecule / tests ─────────────────────────────────────────────────────────
-.molecule/
-.pytest_cache/
-__pycache__/
-*.pyc
-
-# ─── Python (molecule/ansible deps) ───────────────────────────────────────────
-.venv/
-venv/
-
-# ─── Editors / OS ─────────────────────────────────────────────────────────────
-.vscode/
+# Editor / OS junk
 .idea/
+.vscode/
 *.swp
 .DS_Store
 Thumbs.db
 
-# ─── Build staging area (used by repo maintainers) ────────────────────────────
-staging/
+# Python tooling occasionally used with Terraform tooling
+__pycache__/
+.venv/
