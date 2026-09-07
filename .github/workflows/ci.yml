@@ -1,0 +1,55 @@
+# ci.yml — static checks only for the lab-05-aws-free-tier Terraform code.
+#
+# Security policy: CI NEVER runs terraform apply or destroy. Formatting,
+# validation and security linting happen on every push/PR; actually
+# creating AWS resources is a deliberate manual step by the learner.
+# AWS credentials are only needed for the optional plan job, which uses
+# OIDC (no long-lived access keys).
+
+name: lab-05-aws-free-tier-ci
+
+on:
+  push:
+    branches:
+      - lab-05-aws-free-tier
+  pull_request:
+    branches:
+      - main
+
+# No write permissions required for fmt/validate.
+permissions:
+  contents: read
+
+jobs:
+  fmt-and-validate:
+    name: Format and validate Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.x"
+
+      - name: Check formatting (terraform fmt)
+        run: terraform fmt -check -diff -recursive
+
+      - name: Initialize Terraform (backend-free, no credentials needed)
+        run: terraform init -backend=false
+
+      - name: Validate configuration
+        run: terraform validate
+
+  security-scan:
+    name: Security scan (tfsec)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v0.1.4
+        with:
+          soft_fail: false
