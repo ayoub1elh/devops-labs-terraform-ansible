@@ -1,128 +1,206 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 05 — AWS Free Tier Infrastructure with Terraform
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+Build a complete, publicly reachable web server on AWS from scratch using only Free Tier resources: one VPC, one public subnet, one Internet Gateway, one route table, one security group, one SSH key pair, and a single `t2.micro` EC2 instance running Ubuntu 22.04 with Nginx installed automatically. By the end of the lab you will `curl` a live webpage served by a machine Terraform created for you — and you will tear everything down again so it costs nothing.
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+## Learning Objectives
 
-## How to Use This Repository
+- Write Terraform code that provisions a full AWS networking stack (VPC → subnet → IGW → route table).
+- Look up an official Ubuntu AMI with `data "aws_ami"` instead of hardcoding an AMI ID.
+- Restrict security group rules with variables, including scoping SSH to your own IP.
+- Provision an EC2 instance with `user_data` cloud-init scripting to install Nginx.
+- Manage AWS credentials via environment variables — never hardcode them.
+- Read Terraform outputs (public IP, instance ID, SSH command) and verify a deployment end-to-end.
+- Destroy every resource and confirm your AWS bill stays at $0.
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
-
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+## Architecture
 
 ```mermaid
-flowchart LR
-    subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+graph TD
+    Internet([Internet]) --> IGW[Internet Gateway]
+    subgraph VPC [VPC 10.0.0.0/16]
+        IGW --- RT[Route Table<br/>0.0.0.0/0 → IGW]
+        RT --- SUB[Public Subnet 10.0.1.0/24<br/>map_public_ip_on_launch]
+        SUB --- SG[Security Group<br/>SSH 22 ← your IP<br/>HTTP 80 ← 0.0.0.0/0]
+        SG --- EC2[EC2 t2.micro<br/>Ubuntu 22.04 + Nginx]
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
-    end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
-    end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+    KP[SSH Key Pair<br/>from ~/.ssh/id_rsa.pub] --> EC2
+    User([You]) -->|ssh / curl| EC2
 ```
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+**Tools (exact versions used when writing this lab):**
 
-## Cost Warning
+| Tool | Version | Check with |
+| --- | --- | --- |
+| Terraform | >= 1.5.0 (tested with 1.9.x) | `terraform version` |
+| AWS CLI (optional but recommended) | >= 2.x | `aws --version` |
+| Git Bash / WSL / any POSIX shell | any | — |
+| `curl` | any | `curl --version` |
+| `ssh` (OpenSSH) | any | `ssh -V` |
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+**Free account:** an AWS account. A credit/debit card is required to open one, but everything in this lab fits in the 12-month Free Tier if you destroy resources afterward.
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+**SSH key:** you need an existing key pair or generate one (see Troubleshooting if `ssh-keygen` is unfamiliar):
 
-## Contributing
+```bash
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa   # press Enter through the prompts
+```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+**Required environment variables** — Terraform's AWS provider reads these automatically (it can also use an AWS CLI profile, but env vars are what this lab documents):
 
-## License
+| Variable | What it is | Where to get it |
+| --- | --- | --- |
+| `AWS_ACCESS_KEY_ID` | Access key ID for an IAM user | AWS Console → IAM → Users → your user → Security credentials → Create access key |
+| `AWS_SECRET_ACCESS_KEY` | Secret access key (shown once — save it) | Same screen as above |
+| `AWS_DEFAULT_REGION` | Optional; the lab defaults to `us-east-1` | — |
 
-MIT — use it, fork it, teach with it.
+> **Security note:** never paste these into any file in this repo. Export them in your shell only. If they leak, deactivate the key in IAM immediately.
+
+```bash
+# Linux / macOS / Git Bash
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="your-secret"
+export AWS_DEFAULT_REGION="us-east-1"
+```
+
+**IAM permissions:** the user/keys need permission to manage EC2, VPC, and key pairs (the managed policy `AmazonEC2FullAccess` is the simplest option for a lab; in real life use least-privilege).
+
+## Step-by-Step Instructions
+
+**1. Get your public IP** (needed to allow SSH from only your machine):
+
+```bash
+curl -s https://checkip.amazonaws.com
+# Example output:
+# 203.0.113.10
+```
+
+**2. Configure the lab variables:**
+
+```bash
+make setup          # copies terraform.tfvars.example -> terraform.tfvars
+```
+
+Edit `terraform.tfvars` and set `allowed_ssh_cidr` to your IP with `/32`, e.g. `203.0.113.10/32`. Verify your SSH public key exists:
+
+```bash
+cat ~/.ssh/id_rsa.pub   # if missing, run: ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa
+```
+
+**3. Format check and validate:**
+
+```bash
+make lint
+# Expected: no diff from `terraform fmt`, then "Success! The configuration is valid."
+```
+
+**4. Preview the plan (creates nothing):**
+
+```bash
+make test
+# Expected output ends with:
+# Plan: 8 to add, 0 to change, 0 to destroy.
+```
+
+**5. Deploy:**
+
+```bash
+make deploy
+# terraform init  -> downloads the AWS provider
+# terraform plan  -> shows the same 8 resources
+# terraform apply -> prompts: type 'yes'
+# Expected ending:
+# Apply complete! Resources: 8 added, 0 changed, 0 destroyed.
+
+# Outputs:
+# instance_public_ip = "54.x.x.x"
+# instance_id        = "i-0abcdef..."
+# ssh_command        = "ssh -i ~/.ssh/id_rsa ubuntu@54.x.x.x"
+```
+
+> The EC2 instance takes 1–2 minutes after `apply` completes for `user_data` to finish installing Nginx. If the first `curl` fails, wait 60 seconds and retry.
+
+**6. Verify** (see next section), then **7. Clean up** (do not skip — see Free Tier Notes).
+
+## How Do I Know This Worked?
+
+**Check 1 — Terraform outputs exist:**
+
+```bash
+terraform output
+# instance_public_ip = "54.x.x.x"
+# instance_id        = "i-0abcdef..."
+# ssh_command        = "ssh -i ~/.ssh/id_rsa ubuntu@54.x.x.x"
+```
+
+**Check 2 — Nginx answers over HTTP:**
+
+```bash
+curl http://$(terraform output -raw instance_public_ip)
+# Expected output contains:
+# <h1>It works! Nginx on AWS Free Tier (Terraform-managed)</h1>
+```
+
+**Check 3 — SSH works with the generated key:**
+
+```bash
+ssh -i ~/.ssh/id_rsa ubuntu@$(terraform output -raw instance_public_ip) 'systemctl is-active nginx'
+# Expected output:
+# active
+```
+
+**Check 4 — instance state in AWS:**
+
+```bash
+aws ec2 describe-instances \
+  --instance-ids $(terraform output -raw instance_id) \
+  --query 'Reservations[*].Instances[*].State.Name' --output text
+# Expected:
+# running
+```
+
+All four checks passing = the lab worked.
+
+## Cleanup
+
+```bash
+make destroy        # or: terraform destroy — type 'yes' when prompted
+# Expected: "Destroy complete! Resources: 8 destroyed."
+```
+
+Then confirm nothing is left:
+
+```bash
+aws ec2 describe-instances --filters Name=instance-state-name,Values=running --query 'length(Reservations[*].Instances[*])' --output text
+# Expected:
+# 0
+
+make clean          # removes local .terraform/ and plan files
+```
+
+## Troubleshooting
+
+**1. `Error: file: open ~/.ssh/id_rsa.pub: no such file or directory`**
+- *Symptom:* `terraform plan` or `apply` fails immediately when creating the key pair.
+- *Cause:* no SSH key exists at the path in `ssh_public_key_path`.
+- *Fix:* generate one — `ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa` (press Enter through the prompts; empty passphrase is fine for a lab) — or point `ssh_public_key_path` in `terraform.tfvars` at an existing `.pub` file.
+
+**2. `curl` times out or `Connection refused` right after apply**
+- *Symptom:* `curl http://<ip>` fails even though `terraform apply` succeeded.
+- *Cause:* `user_data` runs at first boot and takes 1–2 minutes to install Nginx; or you didn't set `allowed_ssh_cidr`/`map_public_ip_on_launch` correctly (plan shows 8 resources when healthy).
+- *Fix:* wait 60–90 seconds and retry `curl`. If it still fails, check the instance has a public IP (`terraform output instance_public_ip` is not null) and the security group allows port 80 from `0.0.0.0/0`.
+
+**3. `Error: creating EC2 Instance: OptInRequired` (or `UnauthorizedOperation`)**
+- *Symptom:* apply fails with an error about a service not being subscribed, or access denied.
+- *Cause:* your AWS account hasn't accepted the terms for the Ubuntu AMI marketplace listing, or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` are wrong or lack EC2 permissions.
+- *Fix:* log into the AWS Console once (accept any prompts), verify the keys with `aws sts get-caller-identity`, and confirm the IAM user has EC2/VPC permissions such as `AmazonEC2FullAccess`.
+
+## Free Tier Notes
+
+- **EC2:** 750 hours/month of `t2.micro` (or `t3.micro` in some regions) for **12 months** from account creation. This lab uses exactly one `t2.micro`.
+- **EBS:** 30 GB/month of general-purpose SSD storage — the 8 GB root volume here fits. **Do not** change `volume_type` to provisioned IOPS (`io1`/`io2`): those are **not** free and cost per-GB + per-IOPS.
+- **NAT Gateways:** this lab deliberately has **no NAT Gateway** — they cost money per hour (~$0.045/hr, roughly $32/month if left running). If you add private subnets later, remember a NAT Gateway breaks the Free Tier budget.
+- **Data transfer:** 15 GB/month outbound is free; Nginx serving a few test pages is negligible.
+- **Elastic IPs:** not used here. An *unattached* Elastic IP is billed — release any you create.
+- **Free tiers change.** AWS updates Free Tier terms over time. Always run `make destroy`, then check **Billing & Cost Management → Bills** in the console after your first session.
