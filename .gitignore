@@ -1,42 +1,56 @@
-# ─── Terraform ────────────────────────────────────────────────────────────────
-# Local .terraform directories and lock files (per-branch/module)
-**/.terraform/*
-**/.terraform.lock.hcl
+# Lab 00 — .gitignore (shared across all labs in the series)
+#
+# Terraform artifacts
+.terraform/
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+*.tfplan
 crash.log
 crash.*.log
+
+# Terraform variables — never commit real variable values; example files are kept.
 *.tfvars
 !*.tfvars.example
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-.terraformrc
-terraform.rc
 
-# ─── Ansible ──────────────────────────────────────────────────────────────────
-*.retry                # ansible-playbook retry files
-.vault_pass            # never commit vault passwords
-*.vault_pass
+# Terragrunt / misc TF tooling
+.terragrunt-cache/
+tflint_report.json
+
+# Ansible artifacts
+*.retry
+.vault_pass
+.vault_pass.txt
+*.vault.yml
+!*.vault.yml.example
 ansible.log
 
-# ─── Molecule / tests ─────────────────────────────────────────────────────────
+# Molecule / testing
 .molecule/
-.pytest_cache/
-__pycache__/
-*.pyc
+.molecule_cache/
 
-# ─── Python (molecule/ansible deps) ───────────────────────────────────────────
+# Python (ansible, molecule, checkov are Python-based)
+__pycache__/
+*.py[cod]
+*.egg-info/
 .venv/
 venv/
+.pytest_cache/
 
-# ─── Editors / OS ─────────────────────────────────────────────────────────────
+# Security / IaC scanning output (generated locally)
+checkov_report*
+tfsec_results*
+.scannerwork/
+
+# Editor / OS junk
 .vscode/
 .idea/
 *.swp
+*~
 .DS_Store
 Thumbs.db
 
-# ─── Build staging area (used by repo maintainers) ────────────────────────────
-staging/
+# Local env files — never commit secrets
+.env
+.env.*
+!.env.example
