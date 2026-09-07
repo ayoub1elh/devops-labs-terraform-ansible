@@ -1,0 +1,19 @@
+# requirements.yml — Ansible collection dependencies for Lab 14.
+#
+# amazon.aws provides the aws_ec2 inventory plugin (and AWS modules).
+# community.aws provides companion AWS modules often used alongside it.
+#
+# Install with:
+#   ansible-galaxy collection install -r requirements.yml
+#
+# Version note: the amazon.aws collection requires ansible-core >= 2.15
+# (check with `ansible --version`). The collections below pin to the
+# stable 7.x/8.x lines compatible with ansible-core 2.15–2.16; if you run a
+# newer ansible-core, drop the version pins and install the latest release.
+
+---
+collections:
+  - name: amazon.aws
+    version: ">=7.0.0,<9.0.0"
+  - name: community.aws
+    version: ">=7.0.0,<9.0.0"

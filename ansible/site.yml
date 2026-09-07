@@ -1,0 +1,60 @@
+# site.yml — configure every dynamically discovered host: Nginx + custom MOTD.
+#
+# Identical to the Lab 13 playbook except there is NO `-i inventory/hosts.ini`
+# on the command line — the aws_ec2 plugin (inventory/aws_ec2.yml, configured
+# in ansible.cfg) supplies the hosts at runtime. If you add a second tagged
+# instance in the AWS console, this same playbook configures it on the next
+# run with zero changes here.
+
+---
+- name: Configure web servers discovered via the aws_ec2 dynamic inventory
+  hosts: all
+  become: true
+  gather_facts: true
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+  tasks:
+    - name: Install Nginx
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: true
+
+    - name: Ensure Nginx is started and enabled
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Deploy a custom index page
+      ansible.builtin.copy:
+        dest: /var/www/html/index.html
+        content: |
+          <!doctype html>
+          <html>
+            <head><title>Lab 14 — Dynamic Inventory</title></head>
+            <body>
+              <h1>Served by {{ inventory_hostname }}</h1>
+              <p>This host was discovered automatically by the amazon.aws.aws_ec2
+              inventory plugin — no static inventory file exists.</p>
+            </body>
+          </html>
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload nginx
+
+    - name: Deploy a message-of-the-day banner
+      ansible.builtin.copy:
+        dest: /etc/update-motd.d/99-lab-14
+        content: |
+          #!/bin/sh
+          echo "This machine is managed by Ansible (Lab 14 - Dynamic Inventory)."
+        owner: root
+        group: root
+        mode: "0755"

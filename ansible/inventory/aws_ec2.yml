@@ -1,0 +1,63 @@
+# aws_ec2.yml — dynamic inventory configuration for the amazon.aws.aws_ec2 plugin.
+#
+# This file REPLACES the static inventory from the earlier labs. Every time
+# Ansible runs, the plugin queries the AWS API and builds the host list from
+# whatever EC2 instances currently match the filters below — add or terminate
+# an instance and the inventory changes automatically.
+#
+# Requires: the amazon.aws collection (ansible/requirements.yml) and boto3:
+#   pip install boto3
+
+---
+plugin: amazon.aws.aws_ec2
+
+# Query the region from $AWS_REGION (fall back to $AWS_DEFAULT_REGION, then
+# us-east-1) so the same file works for everyone without edits.
+regions:
+  - "{{ lookup('ansible.builtin.env', 'AWS_REGION') | default(lookup('ansible.builtin.env', 'AWS_DEFAULT_REGION'), true) | default('us-east-1', true) }}"
+
+# Only running instances matter, and only those tagged Environment=dev —
+# exactly the tag terraform/main.tf applies to the instance it creates.
+# Try `terraform workspace select staging` style changes later by varying
+# var.environment in Terraform and this filter in tandem.
+filters:
+  tag:Environment: dev
+  instance-state-name: running
+
+# Use the instance's public IP as the inventory hostname/address so Ansible
+# can SSH straight to it.
+hostnames:
+  - ip-address
+
+# Build ad-hoc groups from tags, so `ansible-playbook --limit tag_Name_lab_14_web`
+# or `--limit env_dev` works without touching this file.
+keyed_groups:
+  - key: tags.Name
+    prefix: name
+    separator: "_"
+  - key: tags.Environment
+    prefix: env
+    separator: "_"
+
+# Host variables composed for every discovered host. ansible_user matches the
+# Ubuntu AMI; the private key path can be overridden per-machine with the
+# ANSIBLE_SSH_PRIVATE_KEY_FILE environment variable (never hardcode key paths
+# that differ per developer — and never commit private keys).
+compose:
+  ansible_user: "'ubuntu'"
+  ansible_ssh_private_key_file: "lookup('ansible.builtin.env', 'ANSIBLE_SSH_PRIVATE_KEY_FILE') | default('~/.ssh/devops-labs.pem', true)"
+
+# Optional inventory caching. The plugin caches the API response so repeated
+# runs don't hit rate limits. To enable:
+#   1. Uncomment cache/cache_plugin/cache_connection below.
+#   2. Configure the plugin in ansible.cfg:
+#        [defaults]
+#        fact_caching = ansible.builtin.jsonfile
+#        fact_caching_connection = /tmp/ansible_inventory_cache
+#        fact_caching_timeout = 300
+#   3. Clear stale caches with: ansible-inventory --playbook-dir . --flush-cache
+#      (stale caches are a classic cause of "my new instance isn't showing up").
+# cache: true
+# cache_plugin: ansible.builtin.jsonfile
+# cache_connection: /tmp/ansible_inventory_cache
+# cache_timeout: 300
