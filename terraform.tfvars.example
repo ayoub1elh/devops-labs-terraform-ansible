@@ -1,0 +1,11 @@
+# terraform.tfvars.example — copy to terraform.tfvars and adjust.
+# terraform.tfvars is gitignored so your real values (like your IP) never
+# get committed.
+
+aws_region       = "us-east-1"
+project_name     = "lab08-cicd"
+instance_type    = "t2.micro"
+
+# Look up your public IP at https://whatismyip.com and use /32, e.g.:
+# allowed_ssh_cidr = "203.0.113.10/32"
+allowed_ssh_cidr = "0.0.0.0/0"
