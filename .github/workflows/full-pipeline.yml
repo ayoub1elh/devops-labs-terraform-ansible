@@ -1,0 +1,204 @@
+# full-pipeline.yml — THE CAPSTONE workflow.
+#
+# Job graph (wired with `needs:`):
+#
+#   terraform ──► ansible ──► smoke-test
+#
+#   destroy  (workflow_dispatch only, gated by the `aws-destroy`
+#             GitHub Environment with required reviewers — see README)
+#
+# AWS authentication everywhere uses OIDC via
+# aws-actions/configure-aws-credentials — no long-lived access keys.
+#
+# Required GitHub Secrets (repo Settings > Secrets and variables > Actions):
+#   AWS_ROLE_ARN    — ARN of the IAM role the OIDC provider may assume
+#   SSH_PRIVATE_KEY — private half of the AWS EC2 key pair named by EC2_KEY_NAME
+#   EC2_KEY_NAME    — name of the existing AWS EC2 key pair
+# Ansible Vault is NOT used in this lab; secrets live in GitHub Secrets and
+# are only ever written to ephemeral runner files (see the README's
+# "Secrets pattern" section for how you would add Vault later).
+
+name: full-pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  TF_VERSION: "1.9.8"
+  AWS_REGION: "us-east-1"
+  TF_WORKING_DIR: terraform
+  ANSIBLE_DIR: ansible
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: provision infrastructure, render the inventory, publish outputs.
+  # ---------------------------------------------------------------------------
+  terraform:
+    name: Terraform plan & apply
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for OIDC
+      contents: read
+    outputs:
+      public_ip: ${{ steps.tf-outputs.outputs.public_ip }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Authenticate to AWS with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform fmt check
+        run: terraform -chdir=${{ env.TF_WORKING_DIR }} fmt -check -diff
+
+      - name: Terraform init
+        run: terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false
+
+      - name: Terraform validate
+        run: terraform -chdir=${{ env.TF_WORKING_DIR }} validate
+
+      - name: Terraform plan
+        run: >-
+          terraform -chdir=${{ env.TF_WORKING_DIR }} plan
+          -input=false
+          -var="key_name=${{ secrets.EC2_KEY_NAME }}"
+          -out=tfplan
+
+      - name: Terraform apply
+        run: terraform -chdir=${{ env.TF_WORKING_DIR }} apply -input=false tfplan
+
+      # Expose the instance IP to downstream jobs and save every output as a
+      # JSON artifact (the smoke-test job could also parse this with jq).
+      - name: Write Terraform outputs
+        id: tf-outputs
+        run: |
+          echo "public_ip=$(terraform -chdir=${{ env.TF_WORKING_DIR }} output -raw public_ip)" >> "$GITHUB_OUTPUT"
+          terraform -chdir=${{ env.TF_WORKING_DIR }} output -json > tf-outputs.json
+
+      # Upload the Terraform-generated static inventory plus the outputs.
+      # The ansible job could run from this file alone, but it uses the
+      # dynamic aws_ec2 plugin inventory instead — this artifact exists so you
+      # can inspect exactly what Terraform knew about the fleet.
+      - name: Upload inventory + outputs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs
+          path: |
+            tf-outputs.json
+            ${{ env.ANSIBLE_DIR }}/inventory/hosts.ini
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Job 2: configure the instance(s) with Ansible against the dynamic inventory.
+  # ---------------------------------------------------------------------------
+  ansible:
+    name: Ansible configuration
+    needs: terraform # do not configure before infrastructure exists
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # dynamic inventory calls the AWS API
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Download the terraform artifact (inventory fallback + outputs)
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-outputs
+
+      - name: Install Ansible and the AWS SDK
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible boto3 botocore
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r ${{ env.ANSIBLE_DIR }}/requirements.yml
+
+      - name: Authenticate to AWS with OIDC (for the dynamic inventory)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Secrets pattern: the private key exists only on the ephemeral runner,
+      # with the strictest permissions, and is gone when the job ends. To add
+      # Ansible Vault later, store the vault password in a GitHub Secret and
+      # run with `--vault-password-file <(echo "$VAULT_PASS")`.
+      - name: Configure SSH private key on the runner
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Run the playbook against the dynamic inventory
+        run: >-
+          ansible-playbook
+          -i ${{ env.ANSIBLE_DIR }}/inventory/aws_ec2.yml
+          ${{ env.ANSIBLE_DIR }}/site.yml
+
+  # ---------------------------------------------------------------------------
+  # Job 3: verify Nginx actually answers from the outside.
+  # ---------------------------------------------------------------------------
+  smoke-test:
+    name: HTTP smoke test
+    needs: [terraform, ansible] # needs terraform.outputs AND a finished config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Curl the deployed site (retries until Nginx answers)
+        run: |
+          IP="${{ needs.terraform.outputs.public_ip }}"
+          echo "Smoke-testing http://${IP}/"
+          curl --fail --retry 10 --retry-delay 5 --retry-connrefused "http://${IP}/"
+          curl --fail --retry 10 --retry-delay 5 --retry-connrefused "http://${IP}/health"
+
+  # ---------------------------------------------------------------------------
+  # Manual cleanup: only on workflow_dispatch, and only after a human approves
+  # in the `aws-destroy` environment (required reviewers — see README).
+  # Deliberately has NO `needs:` so it can run even if earlier jobs failed.
+  # ---------------------------------------------------------------------------
+  destroy:
+    name: Terraform destroy (manual, gated)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: aws-destroy # requires reviewers configured in repo Settings
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Authenticate to AWS with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init
+        run: terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false
+
+      # key_name only needs to satisfy the variable; nothing is created.
+      - name: Terraform destroy
+        run: >-
+          terraform -chdir=${{ env.TF_WORKING_DIR }} destroy
+          -input=false
+          -auto-approve
+          -var="key_name=destroy-only"
