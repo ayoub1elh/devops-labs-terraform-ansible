@@ -1,0 +1,20 @@
+# Python-based tooling for the devops-labs-terraform-ansible labs.
+#
+# These are the tools installed via pip across the Ansible/security labs
+# (lab-00, lab-09 through lab-17). Tools that are NOT Python packages —
+# Terraform, tflint, tfsec — must be installed separately; see lab-00's
+# README and Makefile ("make setup").
+#
+# Install:
+#   python3 -m pip install -r requirements.txt
+#
+# In GitHub Actions, use actions/setup-python with cache: pip and point it
+# at this file.
+
+ansible>=9.0.0            # ansible-core + community collections
+ansible-lint>=24.0.0      # Ansible YAML linter (used in CI and make lint)
+yamllint>=1.35.0          # generic YAML linter
+molecule>=24.0.0          # Ansible role testing framework (lab-12)
+molecule-plugins[docker]>=23.0.0  # Docker driver for Molecule (lab-12)
+docker>=7.0.0             # Python Docker client used by Molecule's driver
+checkov>=3.2.0            # infrastructure security scanner (lab-07)
