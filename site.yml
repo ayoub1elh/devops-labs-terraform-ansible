@@ -1,0 +1,104 @@
+---
+# site.yml — the main Ansible playbook for lab-10-playbooks.
+#
+# It configures a single "webservers" group (in this lab: localhost) as an
+# Nginx web server:
+#   1. Update the package cache (apt on Debian/Ubuntu, yum/dnf on RedHat).
+#   2. Install Nginx using the same OS-family conditional.
+#   3. Deploy our custom index.html to the correct web root per OS family.
+#   4. Start + enable Nginx, notifying a handler so config/template changes
+#      trigger a restart only when something actually changed.
+#
+# Run with:  ansible-playbook -i inventory/hosts.ini site.yml  (see README.md)
+
+- name: Configure the web server (Nginx)
+  hosts: webservers
+  become: true            # all tasks need root (package manager, /var/www, service)
+  gather_facts: true      # we need ansible_os_family from gathered facts
+
+  # A variable for the HTML source file keeps the copy task readable and makes
+  # it easy to point at a different content file later.
+  vars:
+    site_source: files/index.html
+
+  tasks:
+    # ---------------------------------------------------------------
+    # Task 1 — refresh the package cache before installing anything.
+    # apt and yum/dnf use different module names, so we select the right
+    # module with an OS-family conditional instead of relying on a single
+    # "package" module (which cannot update the cache on its own).
+    # ---------------------------------------------------------------
+    - name: Update apt package cache (Debian family)
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600   # skip if cache was refreshed within the hour
+      when: ansible_os_family == "Debian"
+
+    - name: Update yum/dnf package cache (RedHat family)
+      ansible.builtin.yum:
+        update_cache: true
+      when: ansible_os_family == "RedHat"
+
+    # ---------------------------------------------------------------
+    # Task 2 — install Nginx. Same OS-family conditional pattern; the
+    # generic "package" module would work here too, but showing the
+    # family split teaches the conditional pattern explicitly.
+    # ---------------------------------------------------------------
+    - name: Install Nginx (Debian family)
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Nginx (RedHat family)
+      ansible.builtin.yum:
+        name: nginx
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    # ---------------------------------------------------------------
+    # Task 3 — deploy the custom landing page. Debian/Ubuntu serve from
+    # /var/www/html, while RedHat-family Nginx packages default to
+    # /usr/share/nginx/html. We pick the destination per OS family.
+    # notify: restart nginx if the file content changes on a later run.
+    # ---------------------------------------------------------------
+    - name: Deploy index.html (Debian family)
+      ansible.builtin.copy:
+        src: "{{ site_source }}"
+        dest: /var/www/html/index.html
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true           # keep index.html.<timestamp> if we overwrite an existing one
+      when: ansible_os_family == "Debian"
+      notify: Restart nginx
+
+    - name: Deploy index.html (RedHat family)
+      ansible.builtin.copy:
+        src: "{{ site_source }}"
+        dest: /usr/share/nginx/html/index.html
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      when: ansible_os_family == "RedHat"
+      notify: Restart nginx
+
+    # ---------------------------------------------------------------
+    # Task 4 — make sure Nginx is running now and after every reboot.
+    # Using the generic "service" module is fine here because we are not
+    # touching package-manager specifics.
+    # ---------------------------------------------------------------
+    - name: Start and enable Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+  # Handlers only run when a task that "notify:" them actually reports a
+  # change — this is what keeps re-runs idempotent (0 changed => no restart).
+  handlers:
+    - name: Restart nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
