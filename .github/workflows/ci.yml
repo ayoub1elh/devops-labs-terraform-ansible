@@ -1,0 +1,52 @@
+# -----------------------------------------------------------------------------
+# .github/workflows/ci.yml — CI for Lab 02 (same flow as Lab 01).
+#
+# Runs on every push and pull request:
+#   1. terraform fmt -check   — fail if code is not HCL-formatted
+#   2. terraform init          — download providers (docker, random)
+#   3. terraform validate      — fail on invalid configuration
+#   4. terraform plan          — prove the config can produce a plan
+#      (ubuntu-latest runners already run a Docker daemon, which the
+#      kreuzwerker/docker provider needs in order to plan.)
+# No cloud credentials are required — everything runs locally on Docker.
+# -----------------------------------------------------------------------------
+
+name: terraform-ci
+
+on:
+  push:
+    branches:
+      - lab-02-variables-outputs
+  pull_request:
+    branches:
+      - lab-02-variables-outputs
+
+# Minimal permissions: the workflow only needs to read the repo contents.
+permissions:
+  contents: read
+
+jobs:
+  fmt-validate-plan:
+    name: Format, Validate & Plan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.x"
+
+      - name: Check formatting (terraform fmt)
+        run: terraform fmt -check -diff
+
+      - name: Initialize Terraform
+        run: terraform init -input=false
+
+      - name: Validate configuration
+        run: terraform validate -no-color
+
+      - name: Terraform plan
+        run: terraform plan -no-color
