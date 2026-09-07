@@ -1,0 +1,12 @@
+---
+# roles/webserver/defaults/main.yml — default variables for the role.
+# These have the LOWEST precedence: they are overridden by vars/,
+# host/group vars, -e extra vars, or CI inputs.
+
+# Document root nginx serves from on Debian/Ubuntu.
+web_root: /var/www/html
+# Port nginx listens on (documented here; used by the README checks).
+webserver_port: 80
+# Content rendered into the templated index page.
+webserver_welcome_title: "Hello from the Ansible CI/CD lab"
+webserver_welcome_message: "This page was deployed by ansible-playbook in GitHub Actions."

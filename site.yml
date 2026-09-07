@@ -1,0 +1,10 @@
+---
+# site.yml — top-level playbook for the lab.
+# Applies the "webserver" role to every host in the [web] group.
+# In CI the [web] group contains localhost (local connection), so the
+# playbook installs nginx on the GitHub Actions ubuntu-latest runner itself.
+- name: Deploy the web server stack
+  hosts: web
+  become: true # nginx install + /var/www writes need root
+  roles:
+    - role: webserver

@@ -1,0 +1,34 @@
+---
+# roles/webserver/tasks/main.yml — tasks for the webserver role.
+# Installs nginx, keeps it running, and deploys a templated index page
+# plus a static health-check file.
+
+- name: Install nginx package
+  ansible.builtin.apt:
+    name: "{{ nginx_package_name }}"
+    state: present
+    update_cache: true # refresh apt metadata so the install resolves
+    cache_valid_time: 3600
+
+- name: Ensure nginx service is started and enabled
+  ansible.builtin.service:
+    name: "{{ nginx_service_name }}"
+    state: started
+    enabled: true # survive reboots on real targets
+
+- name: Deploy index page from Jinja2 template
+  ansible.builtin.template:
+    src: index.html.j2
+    dest: "{{ web_root }}/index.html"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nginx # pick up a new site only if the content changed
+
+- name: Deploy static health-check file
+  ansible.builtin.copy:
+    src: health-check.txt
+    dest: "{{ web_root }}/health-check.txt"
+    owner: root
+    group: root
+    mode: "0644"

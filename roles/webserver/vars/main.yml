@@ -1,0 +1,9 @@
+---
+# roles/webserver/vars/main.yml — role variables.
+# vars/ has HIGHER precedence than defaults/, so values here win over
+# defaults/main.yml but still lose to host vars and -e extra vars.
+
+# Package and service names for Debian/Ubuntu targets. Override these for
+# other distributions (e.g. "httpd" on RHEL-family hosts) via host vars.
+nginx_package_name: nginx
+nginx_service_name: nginx

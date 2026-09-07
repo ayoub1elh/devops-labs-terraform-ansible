@@ -1,0 +1,19 @@
+{# roles/webserver/templates/index.html.j2
+   Templated index page. Values come from the role's default variables,
+   so they can be overridden per host or with -e extra vars. #}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ webserver_welcome_title }}</title>
+    <style>
+      body { font-family: sans-serif; margin: 3rem auto; max-width: 40rem; }
+      h1 { color: #2a7ae2; }
+    </style>
+  </head>
+  <body>
+    <h1>{{ webserver_welcome_title }}</h1>
+    <p>{{ webserver_welcome_message }}</p>
+    <p>Served by <strong>{{ ansible_facts['hostname'] }}</strong> on port {{ webserver_port }}.</p>
+  </body>
+</html>

@@ -1,0 +1,8 @@
+---
+# roles/webserver/handlers/main.yml — handlers notified by the tasks.
+# Handlers run once, at the end of the play, only if they were notified.
+
+- name: Restart nginx
+  ansible.builtin.service:
+    name: "{{ nginx_service_name }}"
+    state: restarted
