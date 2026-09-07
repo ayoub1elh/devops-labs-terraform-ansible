@@ -1,0 +1,49 @@
+---
+# =============================================================================
+# ci.yml — Lab 06: Terraform Workspaces
+#
+# Runs on every push / pull request that touches this lab. Checks that the
+# configuration is formatted (terraform fmt -check) and valid
+# (terraform validate). No AWS credentials are needed: init runs with
+# -backend=false and nothing is ever applied in CI.
+#
+# If this lab directory is moved in the repository, update the two
+# `paths:` filters and `working-directory:` below.
+# =============================================================================
+name: lab-06-workspaces-ci
+
+on:
+  push:
+    paths:
+      - "staging/lab-06-workspaces/**"
+  pull_request:
+    paths:
+      - "staging/lab-06-workspaces/**"
+
+permissions:
+  contents: read
+
+jobs:
+  terraform-fmt-validate:
+    name: Terraform fmt and validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: staging/lab-06-workspaces
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialize Terraform (no backend, no credentials needed)
+        run: terraform init -backend=false
+
+      - name: Validate configuration
+        run: terraform validate
