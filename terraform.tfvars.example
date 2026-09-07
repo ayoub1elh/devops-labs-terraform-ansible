@@ -1,0 +1,20 @@
+# terraform.tfvars.example — copy this file to terraform.tfvars and edit the
+# values for your environment. terraform.tfvars is gitignored by design.
+#
+# cp terraform.tfvars.example terraform.tfvars
+
+# AWS region (default is fine for Free Tier)
+aws_region = "us-east-1"
+
+# t2.micro is the Free Tier instance type — do not change unless you accept charges.
+instance_type = "t2.micro"
+
+# >>> IMPORTANT: replace with YOUR current public IP, suffixed with /32 <<<
+# Find it with:  curl -s https://checkip.amazonaws.com
+# This is the single most important variable: leaving the placeholder means
+# nobody (including you) can SSH in, and using 0.0.0.0/0 invites brute force.
+allowed_ssh_cidr = "203.0.113.10/32"
+
+# Path to your SSH *public* key. Generate one with:
+#   ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa   (press Enter through prompts)
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
