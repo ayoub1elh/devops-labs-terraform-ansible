@@ -1,0 +1,44 @@
+{# ------------------------------------------------------------------
+   Minimal nginx configuration rendered by the webserver role.
+   The `{{ nginx_port }}` variable comes from defaults/main.yml
+   (override with -e "nginx_port=8080").
+
+   The two distro families need different file SHAPES:
+     - Debian/Ubuntu: sites-available/default holds only a `server`
+       block (the main nginx.conf already wraps it in `http {}`).
+     - RedHat family: nginx.conf is the whole config, so we render
+       the full `events {}` + `http {}` structure.
+   The `if` below picks the right shape at render time.
+------------------------------------------------------------------- #}
+{% if ansible_facts['os_family'] == 'RedHat' -%}
+user nginx;
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    server {
+        listen       {{ nginx_port }};
+        server_name  _;
+        root         /var/www/html;
+        index        index.html;
+
+        location / {
+            try_files $uri $uri/ =404;
+        }
+    }
+}
+{% else -%}
+server {
+    listen       {{ nginx_port }};
+    server_name  _;
+    root         /var/www/html;
+    index        index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+{% endif %}

@@ -1,0 +1,24 @@
+---
+# Vars for the webserver role.
+#
+# Vars in vars/main.yml ALWAYS override role defaults (defaults/main.yml),
+# no matter how those defaults are set. That makes vars/main.yml the right
+# place for internal, role-specific facts that consumers should NOT
+# casually change — like the package name and the distro-specific
+# config file path.
+#
+# Precedence reminder (lowest -> highest), simplified:
+#   role defaults  <  playbook vars  <  role vars  <  -e extra vars
+#
+# Note: because role vars beat playbook vars, putting `nginx_port`
+# in THIS file would make it impossible to override from site.yml —
+# which is exactly why the port lives in defaults/main.yml instead.
+nginx_package_name: nginx
+
+# Distro-appropriate destination for the rendered nginx config.
+# Debian/Ubuntu ships a default site at sites-available/default
+# (symlinked from sites-enabled), so we overwrite that file.
+# RedHat-family nginx reads its server config from nginx.conf.
+nginx_config_path:
+  Debian: /etc/nginx/sites-available/default
+  RedHat: /etc/nginx/nginx.conf

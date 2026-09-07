@@ -1,0 +1,22 @@
+---
+# site.yml — top-level playbook for Lab 11 (Roles).
+#
+# In Lab 10 all tasks lived directly in the playbook. Here the
+# playbook has shrunk to a single `roles:` list: all of the logic
+# (install, configure, deploy content, start service) lives inside
+# the `webserver` role under roles/webserver/. This is how real
+# Ansible projects stay organized and reusable.
+#
+# You can still override role variables from here, e.g.:
+#
+#   vars:
+#     nginx_port: 8080
+#
+# (defaults/ values are the easiest to override — see README.md
+# for the precedence order.)
+- name: Deploy the web server using the webserver role
+  hosts: webservers
+  become: true # all tasks need root (install packages, write /etc, manage services)
+
+  roles:
+    - webserver

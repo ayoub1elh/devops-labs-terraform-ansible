@@ -1,0 +1,59 @@
+---
+# Tasks for the webserver role.
+#
+# This is the same logic as Lab 10, relocated into a role:
+#   1. install nginx (apt on Debian family, dnf on RedHat family)
+#   2. render the Jinja2 nginx config to the distro-appropriate path
+#   3. deploy a static index.html
+#   4. enable + start the service
+#
+# The `notify` on the template task triggers the handler in
+# handlers/main.yml, so nginx is restarted only when the config
+# actually changes.
+- name: Ensure the web root exists
+  ansible.builtin.file:
+    path: /var/www/html
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install nginx (Debian/Ubuntu family)
+  ansible.builtin.apt:
+    name: "{{ nginx_package_name }}"
+    state: present
+    update_cache: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Install nginx (RHEL/Rocky/Alma family)
+  ansible.builtin.dnf:
+    name: "{{ nginx_package_name }}"
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Deploy nginx configuration from Jinja2 template
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ nginx_config_path[ansible_facts['os_family']] }}"
+    owner: root
+    group: root
+    mode: '0644'
+  # Only fires the handler when this task reports "changed"
+  # (i.e. the rendered config differs from what is on disk).
+  notify: Restart nginx
+
+- name: Deploy static index page
+  ansible.builtin.copy:
+    src: index.html # roles/webserver/files/index.html
+    dest: /var/www/html/index.html
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure nginx is enabled and started
+  ansible.builtin.service:
+    # The service and the package share the same name on both
+    # distro families, so we reuse the package variable.
+    name: "{{ nginx_package_name }}"
+    state: started
+    enabled: true

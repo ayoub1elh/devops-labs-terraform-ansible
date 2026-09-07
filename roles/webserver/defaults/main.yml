@@ -1,0 +1,11 @@
+---
+# Default variables for the webserver role.
+#
+# Defaults are the LOWEST-precedence variables in Ansible.
+# Anything defined elsewhere — inventory, playbook vars,
+# -e "key=value" extra vars — overrides them. That is why
+# tunables like the port live here: they are meant to be
+# overridden by the role's consumer.
+#
+# Try it:  ansible-playbook site.yml -e "nginx_port=8080"
+nginx_port: 80
