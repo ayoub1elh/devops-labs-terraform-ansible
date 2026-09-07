@@ -1,128 +1,174 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 01 — Deploy an Nginx Container with the Terraform Docker Provider
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+This lab is your gentle introduction to Terraform: you will use the `kreuzwerker/docker` provider to pull the official `nginx:latest` image and run a container on your **local Docker daemon**, publishing a host port that maps to the container's port 80. Everything runs on your machine (or in a GitHub Codespace) — no cloud account, no costs, no credentials.
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+## Learning Objectives
 
-## How to Use This Repository
+- Explain what a Terraform **provider** is and how `required_providers` pins one.
+- Write `resource` blocks that create real infrastructure (a Docker image and container).
+- Use **input variables** to make a configuration reusable without hardcoding values.
+- Read **outputs** after `terraform apply` and use them to verify the deployment.
+- Run the standard Terraform workflow: `init` → `plan` → `apply` → `destroy`.
+- Read a CI workflow that runs `fmt`/`validate`/`plan` only, and explain why CI does not `apply` here.
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
+## Architecture
 
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
-
-## Learning Roadmap
-
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+Everything lives on your local machine — Terraform talks to the Docker daemon over its socket and creates one container:
 
 ```mermaid
 flowchart LR
-    subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+    subgraph Your machine
+        TF[Terraform CLI] -->|init / plan / apply| DockerAPI[Docker daemon<br/>unix:///var/run/docker.sock]
+        DockerAPI --> Img[docker_image.nginx<br/>nginx:latest]
+        DockerAPI --> Ctr[docker_container.nginx<br/>lab-01-nginx :80]
+        User[You] -->|curl localhost:&lt;port&gt;| Ctr
+        User -->|terraform output| TF
     end
-    subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
-    end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
-    end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+    Hub[Docker Hub<br/>nginx:latest] -. pull .-> DockerAPI
 ```
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+| Tool | Version | Notes |
+|---|---|---|
+| Terraform | >= 1.5 | `terraform version` to check; install from https://developer.hashicorp.com/terraform/install |
+| Docker Engine | any recent | Docker Desktop (Windows/Mac) or Docker Engine (Linux) |
 
-## Cost Warning
+**Accounts:** none. Docker Hub anonymous pulls work fine for `nginx`.
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+**Environment variables:** none required — the Docker provider talks to the local socket. Optionally, if your Docker daemon listens elsewhere (rootless Docker, remote host):
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+- `TF_VAR_docker_host` — e.g. `unix:///run/user/1000/docker.sock` for rootless Docker on Linux.
 
-## Contributing
+Verify Docker is running before you start:
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+```bash
+docker version
+```
 
-## License
+You should see both a `Client` and `Server` section. If the `Server` section errors, start Docker Desktop (or `sudo systemctl start docker` on Linux).
 
-MIT — use it, fork it, teach with it.
+## Step-by-Step Instructions
+
+### 1. Get Docker running
+
+- **Windows / macOS:** install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and start it; wait until `docker version` shows the server.
+- **Linux:** `sudo apt-get install docker.io` (Debian/Ubuntu) then `sudo usermod -aG docker $USER` and log out/in, or prefix commands with `sudo`. Verify with `docker run hello-world`.
+- **GitHub Codespaces:** open this repo in a Codespace, press `Ctrl+Shift+P` → "Add Dev Container Configuration Files" → select the **Docker-in-Docker** feature, then rebuild the container. (Alternative: the default Codespaces image already includes Docker — if `docker version` works, you are done. Some images require the `sudo` setup from the Linux note above.)
+
+### 2. Verify Terraform
+
+```bash
+terraform version
+# Expected: Terraform v1.5.x (or newer)
+```
+
+### 3. Initialize the working directory
+
+```bash
+cd staging/lab-01-docker-provider
+terraform init
+```
+
+Expected output (abridged):
+
+```
+Initializing the backend...
+Initializing provider plugins...
+- Finding kreuzwerker/docker versions matching "~> 3.0"...
+- Installing kreuzwerker/docker v3.x.x...
+Terraform has been successfully initialized!
+```
+
+### 4. Preview the changes
+
+```bash
+terraform plan
+```
+
+Expected: a plan showing **2 to add** (`docker_image.nginx`, `docker_container.nginx`) and `Plan: 2 to add, 0 to change, 0 to destroy.`
+
+### 5. Apply
+
+```bash
+terraform apply
+```
+
+Type `yes` when prompted. Expected tail of output:
+
+```
+docker_image.nginx: Creation complete after 3s [id=sha256:...]
+docker_container.nginx: Creation complete after 1s [id=...]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+container_name = "lab-01-nginx"
+mapped_port = 49153      <-- Docker picked a free port since host_port defaults to 0
+url = "http://localhost:49153"
+```
+
+### 6. Verify the running container
+
+```bash
+docker ps --filter name=lab-01-nginx
+# CONTAINER ID   IMAGE          COMMAND                  PORTS                                     NAMES
+# a1b2c3d4e5f6   nginx:latest   "/docker-entrypoint.…"   127.0.0.1:49153->80/tcp   lab-01-nginx
+
+curl localhost:49153
+# Expected: the HTML of the "Welcome to nginx!" page (a <!DOCTYPE html> ... block)
+```
+
+(Use the port from `terraform output mapped_port`.)
+
+### 7. (Optional) Pin a fixed port
+
+```bash
+printf 'host_port = 8080\n' > terraform.tfvars
+terraform apply
+curl localhost:8080
+```
+
+`terraform.tfvars` is gitignored, so your local override never gets committed.
+
+## How Do I Know This Worked?
+
+1. `terraform output url` prints `http://localhost:<port>` and `curl "$(terraform output -raw url)"` returns the nginx welcome page HTML (look for `Welcome to nginx!`).
+2. `docker ps` shows `lab-01-nginx` with a `127.0.0.1:<port>->80/tcp` mapping.
+3. `curl -I localhost:<port>` returns `HTTP/1.1 200 OK`.
+4. `terraform state list` shows `docker_image.nginx` and `docker_container.nginx`.
+
+## Cleanup
+
+```bash
+terraform destroy
+# type yes
+
+docker ps -a --filter name=lab-01-nginx   # should print only the table header (container gone)
+```
+
+Optionally remove working files entirely: `make clean`.
+
+## Troubleshooting
+
+**1. `Error: Error pinging Docker server: Cannot connect to the Docker daemon`**
+
+- Symptom: `terraform plan`/`apply` fails immediately with a connection error mentioning `/var/run/docker.sock`.
+- Cause: the Docker daemon is not running, or Terraform cannot reach the socket (rootless Docker uses a different path).
+- Fix: start Docker Desktop / `sudo systemctl start docker`. For rootless Docker, run `export TF_VAR_docker_host=unix://$(docker context inspect --format '{{.Endpoints.docker.Host}}')` or set the exact socket path, then re-run.
+
+**2. `Error: Unable to read Docker image into resource: unable to pull image nginx:latest`**
+
+- Symptom: the image pull fails or times out (common behind corporate proxies or on fresh machines).
+- Cause: no network access to Docker Hub, or registry authentication required.
+- Fix: check `docker pull nginx:latest` manually. If it fails, fix networking/proxy settings in Docker Desktop, or sign in with `docker login` if your network requires authenticated pulls.
+
+**3. `Error: container lab-01-nginx is already in use` / name conflict on apply**
+
+- Symptom: `terraform apply` fails creating the container because a container named `lab-01-nginx` already exists (e.g. from a previous manual `docker run` or an orphaned apply).
+- Cause: the Docker container name must be unique, and the existing one is not tracked in your Terraform state.
+- Fix: remove the foreign container with `docker rm -f lab-01-nginx` and re-run `terraform apply`. To avoid the clash permanently, set a different name: `printf 'container_name = "my-nginx"\n' >> terraform.tfvars`.
+
+## Free Tier Notes
+
+This lab uses **only your local Docker daemon** — no cloud resources are created, so there is nothing to bill and nothing to leak. Docker Hub anonymous image pulls are free (with generous rate limits; `docker login` raises them). The GitHub Actions workflow runs on free `ubuntu-latest` runners and performs `fmt`/`init`/`validate`/`plan` only — it never applies anything. If you extend this lab to real cloud providers later, remember that free tiers change over time: always run `terraform destroy`, verify resources are gone in the provider console, and check the billing dashboard after every session.
