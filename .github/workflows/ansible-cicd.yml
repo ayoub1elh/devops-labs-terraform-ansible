@@ -1,0 +1,108 @@
+# .github/workflows/ansible-cicd.yml
+# CI/CD for the Ansible webserver role.
+#
+#   * pull_request -> lint job: ansible-lint + yamllint (no changes applied)
+#   * push to main -> deploy job: run site.yml against the inventory
+#
+# The deploy job targets localhost via a local connection on the free
+# ubuntu-latest runner, so no paid runners or hosts are needed.
+#
+# Optional: to deploy to a REAL host instead, set the repository secrets
+#   ANSIBLE_SSH_KEY  — private SSH key for the target (logged as ***)
+#   ANSIBLE_TARGET_HOST / ANSIBLE_TARGET_USER — host var overrides (optional)
+# See README.md -> "Pointing the workflow at a real target".
+
+name: Ansible CI/CD
+
+on: # yamllint disable-line rule:truthy
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read # least privilege: only need to check out code
+
+jobs:
+  lint:
+    # Runs on every pull request. Keeps role/playbook quality high before
+    # anything reaches main.
+    name: Lint Ansible and YAML
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lint tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible ansible-lint yamllint
+
+      - name: Run ansible-lint
+        run: ansible-lint site.yml roles/
+
+      - name: Run yamllint
+        run: yamllint .
+
+  deploy:
+    # Runs only when code lands on main. Installs nginx on the runner
+    # itself via the local connection in inventory/hosts.ini.
+    name: Deploy web server
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      # CI-only convenience: the ephemeral runner has no known_hosts file,
+      # and the default target is localhost (local connection, so SSH is
+      # not even used). This MUST NOT be copied to production workflows —
+      # see README.md -> "Host key checking in CI".
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+      # Optional real-target settings, mapped from secrets so they can be
+      # referenced in step-level `if:` conditions (secrets are not allowed
+      # directly inside `if:`).
+      ANSIBLE_SSH_KEY: ${{ secrets.ANSIBLE_SSH_KEY }}
+      ANSIBLE_TARGET_HOST: ${{ secrets.ANSIBLE_TARGET_HOST }}
+      ANSIBLE_TARGET_USER: ${{ secrets.ANSIBLE_TARGET_USER }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible
+
+      - name: Install SSH key for real target (optional)
+        # Only runs when the ANSIBLE_SSH_KEY secret is configured.
+        if: env.ANSIBLE_SSH_KEY != ''
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$ANSIBLE_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Run playbook against localhost
+        # Default path: deploy on the runner itself (local connection).
+        if: env.ANSIBLE_TARGET_HOST == '' || env.ANSIBLE_TARGET_HOST == null
+        run: ansible-playbook -i inventory/hosts.ini site.yml
+
+      - name: Run playbook against real target
+        # Only runs when ANSIBLE_TARGET_HOST is configured. Host var
+        # overrides point the [web] group at the real machine. Without
+        # ANSIBLE_HOST_KEY_CHECKING=False this step would fail on the
+        # first connection — configure known_hosts instead (see README).
+        if: env.ANSIBLE_TARGET_HOST != '' && env.ANSIBLE_TARGET_HOST != null
+        run: |
+          ansible-playbook -i inventory/hosts.ini site.yml \
+            -e "ansible_host=${ANSIBLE_TARGET_HOST} \
+                ansible_user=${ANSIBLE_TARGET_USER:-ubuntu} \
+                ansible_connection=ssh"
