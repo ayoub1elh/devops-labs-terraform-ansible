@@ -1,0 +1,27 @@
+---
+# roles/webserver/defaults/main.yml
+# Default variables for the webserver role.
+# Defaults have the LOWEST precedence of any variable type: they can be
+# overridden by inventory vars, play vars, -e "key=value" extra vars, etc.
+# Molecule uses these defaults as-is; change them here or override them
+# in converge.yml to experiment.
+
+# TCP port Nginx listens on (inside the container / target host).
+webserver_port: 80
+
+# Name used for the site config file under /etc/nginx/sites-available/.
+webserver_site_name: lab12
+
+# Directory Nginx serves files from.
+webserver_docroot: /var/www/lab12
+
+# Text shown on the generated index page (demonstrates template variables).
+webserver_welcome_message: "Hello from the lab-12 webserver role!"
+
+# Packages to install. Defined as a list so it can be overridden easily.
+webserver_packages:
+  - nginx
+  - curl
+
+# systemd service name (Ubuntu/Debian).
+webserver_service_name: nginx

@@ -1,0 +1,14 @@
+---
+# Molecule converge playbook (lab-12).
+# "Converge" is Molecule's word for "apply the role to the test instance".
+# `molecule converge` runs ONLY this step (instance must already exist);
+# `molecule test` runs it after create and before idempotence/verify.
+
+- name: Converge
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Apply the webserver role
+      ansible.builtin.include_role:
+        name: webserver

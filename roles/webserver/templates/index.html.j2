@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+{# Jinja2 template for the role's index page.
+   Rendered by the ansible.builtin.template task; variables come from
+   defaults/main.yml (or any higher-precedence override). #}
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ webserver_site_name }}</title>
+  </head>
+  <body>
+    <h1>{{ webserver_welcome_message }}</h1>
+    {# ansible_hostname is static per host; no timestamps here — a value that
+       changes every run would make the template task always "change", which
+       breaks Molecule's idempotence check. #}
+    <p>Served by Nginx on {{ ansible_hostname }} port {{ webserver_port }}.</p>
+  </body>
+</html>

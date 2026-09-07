@@ -1,0 +1,11 @@
+---
+# roles/webserver/vars/main.yml
+# Role-specific variables. Unlike defaults, values here are tied to this
+# role and normally should NOT be overridden (use defaults/main.yml for
+# user-tunable values). Kept small to demonstrate the defaults vs. vars
+# distinction from lab-11.
+
+# OS family detection result, used to prove the role targets Debian-family
+# hosts only. Tasks assert on this in more advanced labs; here it simply
+# documents the supported platform.
+webserver_supported_os_family: Debian

@@ -1,0 +1,60 @@
+---
+# Molecule verify playbook (lab-12).
+# Runs AFTER converge/idempotence and asserts the role actually produced a
+# working web server — this is the "test" in Molecule. If any assert fails,
+# `molecule test` reports a failure.
+#
+# We check two things:
+#   1. Nginx answers with HTTP 200 on port 80 (via ansible.builtin.uri).
+#   2. The response body contains the welcome message from the role
+#      defaults — proving the template was rendered with our variables.
+
+- name: Verify
+  hosts: all
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Request the index page over HTTP
+      ansible.builtin.uri:
+        url: "http://localhost:{{ webserver_port | default(80) }}/"
+        # A non-2xx code should fail here immediately...
+        status_code: 200
+        return_content: true
+      # ...but we also capture the result so asserts below give clearer
+      # error messages than a bare uri failure would.
+      register: index_response
+      # The service may need a moment after the (re)load triggered by
+      # handlers; retry briefly instead of flaking.
+      retries: 5
+      delay: 2
+      until: index_response.status == 200
+
+    - name: Assert the index page returns HTTP 200
+      ansible.builtin.assert:
+        that:
+          - index_response.status == 200
+        fail_msg: "Expected HTTP 200 from Nginx, got {{ index_response.status }}"
+        success_msg: "Nginx returned HTTP 200 on port 80"
+
+    - name: Assert the page contains the role's welcome message
+      ansible.builtin.assert:
+        that:
+          - "'Hello from the lab-12 webserver role!' in index_response.content"
+        fail_msg: "Index page does not contain the expected welcome message"
+        success_msg: "Index page content matches the role defaults"
+
+    - name: Request the static health page
+      ansible.builtin.uri:
+        url: "http://localhost:{{ webserver_port | default(80) }}/health.html"
+        status_code: 200
+      register: health_response
+      retries: 5
+      delay: 2
+      until: health_response.status == 200
+
+    - name: Assert the health page is served correctly
+      ansible.builtin.assert:
+        that:
+          - health_response.status == 200
+        fail_msg: "Health endpoint /health.html did not return HTTP 200"
+        success_msg: "Health endpoint /health.html returned HTTP 200"

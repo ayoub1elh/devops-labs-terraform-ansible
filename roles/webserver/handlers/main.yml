@@ -1,0 +1,17 @@
+---
+# roles/webserver/handlers/main.yml
+# Handlers triggered by config/template changes in tasks/main.yml.
+# Handlers only run when a task actually changed something, which is
+# what makes repeated runs of this role idempotent.
+
+- name: Reload nginx
+  ansible.builtin.service:
+    name: "{{ webserver_service_name }}"
+    state: reloaded
+  become: true
+
+- name: Restart nginx
+  ansible.builtin.service:
+    name: "{{ webserver_service_name }}"
+    state: restarted
+  become: true

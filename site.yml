@@ -1,0 +1,16 @@
+---
+# site.yml — example playbook applying the webserver role (lab-12).
+# This file is OPTIONAL for the lab itself (Molecule converges the role
+# directly), but it shows how you would use the role against real hosts:
+#
+#   ansible-playbook -i inventory.ini site.yml
+#
+# For this lab's purposes it also serves as a lint target for ansible-lint.
+
+- name: Configure web servers with the webserver role
+  hosts: webservers
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: webserver

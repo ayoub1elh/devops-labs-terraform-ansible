@@ -1,0 +1,77 @@
+---
+# roles/webserver/tasks/main.yml
+# Main task list for the "webserver" role.
+# Installs Nginx, deploys the virtual-host config and index page from
+# templates, drops a static health file, and ensures the service runs.
+# This file is exercised by Molecule in lab-12 (converge + idempotence).
+
+- name: Update apt cache before installing packages
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+- name: Install Nginx and curl (for local health checks)
+  ansible.builtin.apt:
+    name: "{{ webserver_packages }}"
+    state: present
+  become: true
+
+- name: Deploy the Nginx site configuration
+  ansible.builtin.template:
+    src: nginx-site.conf.j2
+    dest: "/etc/nginx/sites-available/{{ webserver_site_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload nginx
+
+- name: Enable the site (symlink into sites-enabled)
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ webserver_site_name }}"
+    dest: "/etc/nginx/sites-enabled/{{ webserver_site_name }}"
+    state: link
+  become: true
+  notify: Reload nginx
+
+- name: Remove the default site so our site answers first
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  become: true
+  notify: Reload nginx
+
+- name: Ensure the document root exists
+  ansible.builtin.file:
+    path: "{{ webserver_docroot }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"
+  become: true
+
+- name: Deploy the health-check page (static file, no templating needed)
+  ansible.builtin.copy:
+    src: health.html
+    dest: "{{ webserver_docroot }}/health.html"
+    owner: www-data
+    group: www-data
+    mode: "0644"
+  become: true
+
+- name: Deploy the index page from template
+  ansible.builtin.template:
+    src: index.html.j2
+    dest: "{{ webserver_docroot }}/index.html"
+    owner: www-data
+    group: www-data
+    mode: "0644"
+  become: true
+
+- name: Ensure Nginx is started and enabled at boot
+  ansible.builtin.service:
+    name: "{{ webserver_service_name }}"
+    state: started
+    enabled: true
+  become: true

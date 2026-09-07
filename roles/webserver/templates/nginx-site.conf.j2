@@ -1,0 +1,16 @@
+{# Jinja2 template for the Nginx virtual-host ("site") configuration.
+     Deployed to /etc/nginx/sites-available/{{ webserver_site_name }} and
+     symlinked into sites-enabled by tasks/main.yml. #}
+server {
+    listen {{ webserver_port }} default_server;
+    listen [::]:{{ webserver_port }} default_server;
+
+    server_name _;
+
+    root {{ webserver_docroot }};
+    index index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}

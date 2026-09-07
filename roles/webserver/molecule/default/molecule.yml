@@ -1,0 +1,59 @@
+---
+# Molecule scenario configuration for the webserver role (lab-12).
+# This file describes the test instance(s) Molecule creates and how the
+# role is applied and verified against them.
+#
+# Lifecycle (what `molecule test` runs, in order):
+#   dependency -> create -> prepare -> converge -> idempotence -> verify -> destroy
+#
+# Driver: Docker. The geerlingguy/docker-ubuntu2204-ansible image is a
+# ready-made Ubuntu 22.04 image with Python 3 and systemd preconfigured,
+# which makes it the easiest option for Ansible-in-Docker testing.
+#
+# Alternative (documented in the README): use a plain `ubuntu:22.04` image
+# with `privileged: true`, `cgroupns_mode: host`, a /sys/fs/cgroup volume
+# mount, and a prepare playbook that installs python3 — but you must then
+# also handle systemd startup yourself, so the ready-made image is strongly
+# recommended for beginners.
+
+driver:
+  name: docker
+
+platforms:
+  # Instance name. Molecule derives the Ansible inventory name from this.
+  - name: ubuntu2204
+    # Pre-built image with Python 3 + systemd for Ansible use.
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    # Privileged mode is required for systemd to run inside the container
+    # (Nginx is managed as a systemd service on Ubuntu).
+    privileged: true
+    # Required on Docker >= 20.10 with cgroup v2 so systemd sees the host
+    # cgroup namespace; harmless on older Docker versions.
+    cgroupns_mode: host
+    volumes:
+      # Gives systemd inside the container access to the host cgroup fs.
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    # Keep the image's own entrypoint (systemd); do not override CMD.
+    command: ""
+    # The image is pulled as-is; no Dockerfile build step.
+    pre_build_image: true
+
+provisioner:
+  name: ansible
+  # Run ansible-playbook with more verbosity in CI/logs (0-4).
+  ansible_args:
+    - -v
+  inventory:
+    group_vars:
+      all:
+        # The geerlingguy image boots as the "root" user; the role uses
+        # become: true internally, so this just silences pip warnings.
+        ansible_user: root
+  config_options:
+    defaults:
+      # Fast, readable failure output — good for learners.
+      stdout_callback: default
+      display_failed_stderr: true
+
+verifier:
+  name: ansible
