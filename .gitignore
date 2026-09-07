@@ -1,42 +1,55 @@
-# ─── Terraform ────────────────────────────────────────────────────────────────
-# Local .terraform directories and lock files (per-branch/module)
-**/.terraform/*
-**/.terraform.lock.hcl
+# ------------------------------------------------------------------------------
+# .gitignore — Lab 13 (Terraform + Ansible).
+#
+# Keeps state, variables with real values, provider caches, Ansible retry and
+# vault-password artifacts, and editor/OS junk out of git.
+# ------------------------------------------------------------------------------
+
+# --- Terraform ---
+# Provider/module cache and lock file (regenerate with `terraform init`)
+.terraform/
+.terraform.lock.hcl
+
+# State files contain sensitive data (IPs, potentially secrets) — never commit
 *.tfstate
 *.tfstate.*
 crash.log
 crash.*.log
+
+# Real variable values (local-only). The example file IS committed below.
 *.tfvars
 !*.tfvars.example
+!terraform.tfvars.example
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
-.terraformrc
-terraform.rc
 
-# ─── Ansible ──────────────────────────────────────────────────────────────────
-*.retry                # ansible-playbook retry files
-.vault_pass            # never commit vault passwords
-*.vault_pass
-ansible.log
+# Plan files
+tfplan
+*.tfplan
 
-# ─── Molecule / tests ─────────────────────────────────────────────────────────
-.molecule/
-.pytest_cache/
+# --- Ansible ---
+*.retry                  # retry files left behind by failed playbook runs
+.vault_pass              # never commit a vault password file
+.molecule/               # Molecule test environments (see Lab 12)
+.cache/
+
+# --- Lab-generated handoff artifact ---
+# aws_hosts.ini is written (and deleted) by Terraform on every apply/destroy —
+# it contains your current public IP and must never be committed.
+ansible/inventory/aws_hosts.ini
+
+# --- Python / tooling virtualenvs ---
+.venv/
+venv/
 __pycache__/
 *.pyc
 
-# ─── Python (molecule/ansible deps) ───────────────────────────────────────────
-.venv/
-venv/
-
-# ─── Editors / OS ─────────────────────────────────────────────────────────────
+# --- Editor / OS junk ---
 .vscode/
 .idea/
 *.swp
+*~
 .DS_Store
 Thumbs.db
-
-# ─── Build staging area (used by repo maintainers) ────────────────────────────
-staging/
