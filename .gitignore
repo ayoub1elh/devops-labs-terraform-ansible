@@ -1,42 +1,30 @@
-# ─── Terraform ────────────────────────────────────────────────────────────────
-# Local .terraform directories and lock files (per-branch/module)
-**/.terraform/*
-**/.terraform.lock.hcl
+# .gitignore for lab-09-ansible-basics (Terraform + Ansible conventions)
+
+# --- Terraform state and working files (kept for consistency across labs) ---
+.terraform/
 *.tfstate
 *.tfstate.*
-crash.log
-crash.*.log
 *.tfvars
 !*.tfvars.example
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-.terraformrc
-terraform.rc
+crash.log
+crash.*.log
 
-# ─── Ansible ──────────────────────────────────────────────────────────────────
-*.retry                # ansible-playbook retry files
-.vault_pass            # never commit vault passwords
-*.vault_pass
-ansible.log
+# --- Ansible artifacts ---
+*.retry              # leftover retry files from failed playbook runs
+.vault_pass          # never commit vault passwords
+.molecule/           # molecule test caches
+*.vault.yml          # encrypted var files committed by mistake
 
-# ─── Molecule / tests ─────────────────────────────────────────────────────────
-.molecule/
-.pytest_cache/
+# --- Python (Ansible is a Python tool) ---
 __pycache__/
-*.pyc
-
-# ─── Python (molecule/ansible deps) ───────────────────────────────────────────
+*.py[cod]
 .venv/
 venv/
 
-# ─── Editors / OS ─────────────────────────────────────────────────────────────
+# --- Editor / OS junk ---
 .vscode/
 .idea/
 *.swp
+*~
 .DS_Store
 Thumbs.db
-
-# ─── Build staging area (used by repo maintainers) ────────────────────────────
-staging/
