@@ -1,128 +1,219 @@
-# DevOps Labs: Terraform & Ansible
+# Lab 00 — Environment Setup & Toolchain Validation
 
-A hands-on, beginner-friendly learning repository for **Terraform** and **Ansible** — built entirely on **free-tier resources** and **GitHub Actions**.
+Welcome! This is the very first lab in the **devops-labs-terraform-ansible** series. Before we
+build anything with Terraform or configure anything with Ansible, we need to make sure your
+development environment has all the tools we will use throughout the course — and that each tool
+is a recent enough version. This lab validates your toolchain in two ways: **automatically in
+GitHub Actions** (runs on every push and pull request) and **locally** with a single `make setup`
+command.
 
-Each lab lives on its own **Git branch**. Every branch is self-contained: it has its own `README.md`, `Makefile`, code, and CI workflow. You never need to finish one lab to start another, but the labs are ordered so that skills build progressively.
+> **What this lab does NOT do:** it does not create, deploy, or cost you a single cloud resource.
+> It only installs and version-checks software.
 
-## How to Use This Repository
+## Learning Objectives
 
-1. **Fork** this repository (see `CONTRIBUTING.md` if you want to add labs).
-2. Pick a lab below and check out its branch:
-   ```bash
-   git checkout lab-01-docker-provider
-   ```
-3. Follow the `README.md` on that branch — it contains learning objectives, a diagram, step-by-step instructions, verification, cleanup, and troubleshooting.
-4. Every lab has a `Makefile`. Standard targets are:
-   | Target    | What it does |
-   |-----------|--------------|
-   | `setup`   | Install/verify prerequisites |
-   | `lint`    | Run linters (tflint, ansible-lint, yamllint) |
-   | `test`    | Run tests (validate, molecule, security scans) |
-   | `deploy`  | Apply the infrastructure / run the playbook |
-   | `destroy` | Tear everything down |
-   | `clean`   | Remove local artifacts |
+By the end of this lab you will be able to:
 
-> **Tip:** Use GitHub Codespaces for a zero-install experience. Most labs work out of the box there.
+- Fork a GitHub repository and open it in **GitHub Codespaces** (or a local clone).
+- Explain what each tool in the toolchain does: Terraform, Ansible, tflint, ansible-lint,
+  checkov, tfsec, and Molecule.
+- Validate your toolchain locally with `make setup`.
+- Read and understand a GitHub Actions workflow (`.github/workflows/setup.yml`) that installs
+  and verifies the same tools in CI.
+- Confirm that the green ✅ checkmark on your pull request means "your environment is ready".
 
-## Learning Roadmap
+## Architecture
 
-### Phase 1 — Terraform Fundamentals
-
-- [ ] **Lab 00 — Setup & Tooling Validation** → [`lab-00-setup`](../../tree/lab-00-setup)
-  Install Terraform, Ansible, tflint, ansible-lint, checkov, tfsec, Molecule. Validate everything in CI.
-- [ ] **Lab 01 — Docker Provider** → [`lab-01-docker-provider`](../../tree/lab-01-docker-provider)
-  Deploy a local Nginx container with the `kreuzwerker/docker` provider.
-- [ ] **Lab 02 — Variables, Locals & Outputs** → [`lab-02-variables-outputs`](../../tree/lab-02-variables-outputs)
-  Parameterize Lab 01 with variables, `locals`, and `tfvars`.
-- [ ] **Lab 03 — Modules** → [`lab-03-modules`](../../tree/lab-03-modules)
-  Refactor into a reusable `container-service` module; deploy blue/green containers.
-- [ ] **Lab 04 — State Backends** → [`lab-04-state-backends`](../../tree/lab-04-state-backends)
-  Migrate local state to Terraform Cloud (free tier).
-
-### Phase 2 — Terraform on AWS (Free Tier)
-
-- [ ] **Lab 05 — AWS Free Tier** → [`lab-05-aws-free-tier`](../../tree/lab-05-aws-free-tier)
-  VPC, subnet, security group, and a `t2.micro` EC2 instance running Nginx via `user_data`.
-- [ ] **Lab 06 — Workspaces** → [`lab-06-workspaces`](../../tree/lab-06-workspaces)
-  Manage `dev` and `staging` environments with Terraform workspaces.
-- [ ] **Lab 07 — Security Scanning** → [`lab-07-security-scanning`](../../tree/lab-07-security-scanning)
-  checkov + tfsec + tflint in CI. Learn to handle findings and suppress false positives.
-- [ ] **Lab 08 — Terraform CI/CD** → [`lab-08-terraform-cicd`](../../tree/lab-08-terraform-cicd)
-  `plan` on pull requests, `apply` on merge — with AWS OIDC, no stored keys.
-
-### Phase 3 — Ansible Fundamentals
-
-- [ ] **Lab 09 — Ansible Basics** → [`lab-09-ansible-basics`](../../tree/lab-09-ansible-basics)
-  Inventory, `ansible.cfg`, and ad-hoc commands.
-- [ ] **Lab 10 — Playbooks** → [`lab-10-playbooks`](../../tree/lab-10-playbooks)
-  Your first playbook: install Nginx, deploy a page, handlers, idempotence.
-- [ ] **Lab 11 — Roles** → [`lab-11-roles`](../../tree/lab-11-roles)
-  Refactor the playbook into a `webserver` role. Defaults, vars, templates.
-- [ ] **Lab 12 — Molecule Testing** → [`lab-12-molecule-testing`](../../tree/lab-12-molecule-testing)
-  Test the role in Docker with Molecule: converge, idempotence, verify.
-
-### Phase 4 — Terraform + Ansible Together
-
-- [ ] **Lab 13 — Terraform → Ansible Integration** → [`lab-13-tf-ansible-integration`](../../tree/lab-13-tf-ansible-integration)
-  Terraform writes an inventory file; Ansible configures the EC2 it created.
-- [ ] **Lab 14 — Dynamic Inventory** → [`lab-14-dynamic-inventory`](../../tree/lab-14-dynamic-inventory)
-  Discover EC2 instances on the fly with the `amazon.aws.aws_ec2` inventory plugin.
-- [ ] **Lab 15 — Ansible Vault** → [`lab-15-ansible-vault`](../../tree/lab-15-ansible-vault)
-  Encrypt secrets with `ansible-vault`, decrypt in CI with a GitHub Secret.
-
-### Phase 5 — CI/CD & The Capstone
-
-- [ ] **Lab 16 — Ansible CI/CD** → [`lab-16-ansible-cicd`](../../tree/lab-16-ansible-cicd)
-  Lint and molecule-test on PRs; deploy on merge.
-- [ ] **Lab 17 — Full DevOps Pipeline** → [`lab-17-full-devops-pipeline`](../../tree/lab-17-full-devops-pipeline)
-  The capstone: Terraform apply (OIDC) → Ansible configure → smoke test → cleanup.
-
-## Architecture Overview
+Nothing is deployed in this lab. The diagram below shows the components involved: your fork of
+the repo, the CI runner that validates the toolchain, and your local machine.
 
 ```mermaid
 flowchart LR
     subgraph Local["Your Machine / Codespaces"]
-        TF[Terraform]
-        AN[Ansible]
-        MK[Make]
+        Dev[Developer] --> Clone[Git clone / Fork]
+        Clone --> Make["make setup\n(runs local version checks)"]
+        ToolsLocal[terraform, ansible,\ntflint, ansible-lint,\ncheckov, tfsec, molecule]
     end
     subgraph GitHub["GitHub"]
-        GA[GitHub Actions]
-        SEC[Secrets / OIDC]
+        Fork[Your Fork] -->|push / pull_request| GHA[GitHub Actions\nubuntu-latest runner]
+        GHA --> Install[Install 7 tools]
+        Install --> Verify[Verify each tool\nprints a version]
+        Verify -->|green checkmark| PR[Pull Request]
     end
-    subgraph Cloud["Free-Tier Cloud"]
-        AWS[(AWS Free Tier)]
-        TFC[(Terraform Cloud)]
-        DK[(Docker)]
-    end
-    TF --> DK
-    TF --> AWS
-    TF --> TFC
-    AN --> AWS
-    GA --> SEC
-    GA --> AWS
+    Make --> ToolsLocal
+    Clone --> Fork
 ```
 
 ## Prerequisites
 
-- A GitHub account (free)
-- One of:
-  - **GitHub Codespaces** (easiest — no local installs), or
-  - A local machine with Git, and per-lab tools installed via each lab's `make setup`
-- Free cloud accounts where labs require them (AWS, Terraform Cloud) — each lab README says exactly what to create and warns about free-tier limits
+You have **two options** for completing the labs. Both work; pick one.
 
-## Cost Warning
+### Option A — GitHub Codespaces (recommended, zero local installs)
 
-Everything here is designed to fit within free tiers, but **cloud free tiers change**. Always:
+- A **free GitHub account** (github.com/join). Free accounts include a monthly quota of
+  Codespaces hours — this lab uses only minutes.
+- A browser. That is it.
 
-1. Read the "Free Tier Notes" section in each lab README.
-2. Run `make destroy` (or `terraform destroy`) when done.
-3. Check the AWS Billing console after each lab.
+### Option B — Local machine
 
-## Contributing
+| Tool     | Minimum version | How to install (pick one)                                    |
+|----------|-----------------|--------------------------------------------------------------|
+| Git      | 2.40+           | [git-scm.com](https://git-scm.com/downloads)                 |
+| GNU Make | 3.81+           | `sudo apt install make` / `choco install make` / Xcode CLT   |
+| Python   | 3.10+           | [python.org](https://www.python.org/downloads/)              |
+| pipx     | 1.2+            | `python -m pip install --user pipx` then `pipx ensurepath`  |
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and how to add a new lab.
+The remaining tools (Terraform, tflint, ansible, ansible-lint, checkov, tfsec, molecule) will be
+installed **by the Makefile itself** via `pipx` and official release downloads — you do not need
+to install them by hand.
 
-## License
+**Required environment variables:** none for this lab. Later labs will require cloud credentials
+such as `AWS_ACCESS_KEY_ID` — not here.
 
-MIT — use it, fork it, teach with it.
+## Step-by-Step Instructions
+
+### 1. Fork the repository
+
+1. Log in to GitHub and open the original repository.
+2. Click **Fork** (top-right) → keep the default name → **Create fork**.
+
+### 2a. Open the fork in GitHub Codespaces (one click)
+
+1. Open **your fork** in the browser.
+2. Press the `.` (period) key on your keyboard.
+
+   > Pressing `.` is the GitHub shortcut that opens the repository in the
+   > **github.dev web editor**. From there, press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS),
+   > type `Create New Codespace`, and hit Enter. Alternatively, click the green **Code** button →
+   > **Codespaces** tab → **Create codespace on main**. A Codespace is a full Linux container in
+   > the cloud with everything needed to run the labs — no local installation required.
+
+3. Wait 1–2 minutes while the Codespace builds. You now have a VS Code-like editor running in
+   your browser, with a terminal at the bottom.
+
+### 2b. Or clone locally
+
+```bash
+git clone https://github.com/YOUR-USERNAME/devops-labs-terraform-ansible.git
+cd devops-labs-terraform-ansible
+```
+
+### 3. Validate the toolchain locally
+
+```bash
+make setup
+```
+
+Expected output (versions will vary slightly — that is fine as long as each command prints a
+version and no command says "command not found"):
+
+```
+==> Lab 00: validating local toolchain...
+Terraform v1.9.x
+ansible [core 2.16.x]
+tflint version 0.5x.x
+ansible-lint 24.x.x using ansible-core:2.16.x
+checkov 3.x.x
+v1.28.x
+molecule 24.x.x using python 3.12.x
+==> All 7 tools are installed and on PATH. Toolchain OK.
+```
+
+If any tool is missing, the Makefile installs it for you (via `pipx` and the official Terraform
+and tflint installers), then re-runs the checks.
+
+### 4. Watch CI validate the same tools
+
+```bash
+git checkout -b lab-00-setup
+git add -A
+git commit -m "lab 00: toolchain validation"
+git push origin lab-00-setup
+```
+
+Then open your fork on GitHub → **Pull requests** → **New pull request** → base `main`, compare
+`lab-00-setup` → **Create pull request**. The **Setup / validate** workflow runs automatically,
+installs all seven tools on an `ubuntu-latest` runner, and prints each version.
+
+You can also see it run on every push under the **Actions** tab.
+
+## How Do I Know This Worked?
+
+- Locally: `make setup` finishes with `==> All 7 tools are installed and on PATH. Toolchain OK.`
+- In CI: the pull request shows a green ✅ next to the **validate-toolchain** job; clicking it
+  shows each tool's version in the "Verify tool versions" step log:
+
+```
+Run for tool in terraform ansible tflint ansible-lint checkov tfsec molecule; do
+  echo "::group::$tool"
+  terraform version
+  ansible --version
+  tflint --version
+  ansible-lint --version
+  checkov --version
+  tfsec --version
+  molecule --version
+  echo "::endgroup::"
+done
+```
+
+- Quick spot-check of any single tool:
+
+```bash
+terraform version
+# Terraform v1.9.x ...  <- a version string, not "command not found"
+```
+
+## Cleanup
+
+This lab creates **no cloud resources**, so there is nothing to tear down and **nothing that can
+cost you money**. To clean up your local environment (or the Codespace):
+
+- **Codespaces:** in your fork on GitHub → **Code** → **Codespaces** → ⋯ menu on your Codespace →
+  **Delete**. This stops the billing meter (free-tier quota usage).
+- **Local clone (optional):** remove the tools the Makefile installed:
+
+```bash
+pipx uninstall ansible ansible-lint molecule checkov 2>/dev/null
+# terraform / tflint, if installed via the Makefile's default paths:
+sudo rm -f /usr/local/bin/terraform /usr/local/bin/tflint
+rm -f "$HOME/bin/tfsec"
+```
+
+- **Fork (optional):** keep it — all labs build on it.
+
+## Troubleshooting
+
+1. **`make: command not found`**
+   - **Symptom:** Running `make setup` prints `make: command not found` (or `'make' is not
+     recognized`).
+   - **Cause:** GNU Make is not installed. On Windows it ships with Git Bash but is not on PATH;
+     on macOS it needs Xcode Command Line Tools.
+   - **Fix:** Install it — `sudo apt install make` (Linux), `xcode-select --install` (macOS),
+     or run the steps inside a **GitHub Codespace**, where `make` is preinstalled.
+
+2. **`pipx: command not found` when running `make setup`**
+   - **Symptom:** The setup fails at an install step saying `pipx: command not found`.
+   - **Cause:** `pipx` is installed but its bin directory is not on your shell's PATH, or pipx
+     was never installed.
+   - **Fix:** Run `python3 -m pip install --user pipx && pipx ensurepath`, then open a **new
+     terminal** (PATH changes only take effect in new shells) and re-run `make setup`.
+
+3. **CI job fails at `tfsec --version` with "command not found"**
+   - **Symptom:** The GitHub Actions log shows everything except `tfsec` working.
+   - **Cause:** `tfsec` is installed by downloading a release binary to `$HOME/bin`; if the
+     workflow's PATH setup was changed, `$HOME/bin` may not be on PATH.
+   - **Fix:** The workflow adds `$HOME/bin` to `GITHUB_PATH` before the verify step. If you
+     edited the workflow, ensure that step runs **before** the version-check loop, then re-push.
+
+## Free Tier Notes
+
+- **This lab provisions zero cloud resources** — there is no AWS, Azure, or GCP usage, so there
+  is no bill to worry about yet.
+- **GitHub Actions:** free for public repositories (2,000 minutes/month on free private repos).
+  This workflow takes ~3 minutes per run.
+- **GitHub Codespaces:** free accounts get a monthly quota of core-hours and storage; deleting
+  the Codespace (see Cleanup) stops any quota consumption.
+- **Free tiers and quotas change over time.** Always run the Cleanup section, then check
+  [GitHub Billing](https://github.com/settings/billing) (and your cloud billing console in later
+  labs) after finishing.
