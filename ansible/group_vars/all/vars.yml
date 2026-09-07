@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# lab-15-ansible-vault — plain group variables (NOT encrypted)
+#
+# This file holds non-sensitive variables. Sensitive values are stored in
+# the encrypted vault.yml and referenced here indirectly so playbooks and
+# templates never mention the vault variable names' contents.
+#
+# NOTE: `db_password` is just an alias for the vault variable. Ansible
+# resolves `vault_db_password` from the encrypted vault.yml at runtime;
+# if you run without a vault password, resolution fails and Ansible warns.
+# =============================================================================
+
+# Public, non-sensitive settings — safe to commit in cleartext.
+app_name: lab15
+app_config_path: /tmp/lab15-app.conf
+
+# Sensitive value BY REFERENCE only. The actual secret lives in the
+# encrypted vault.yml as `vault_db_password`. This indirection means the
+# string "{{ vault_db_password }}" appears in cleartext, but the resolved
+# VALUE is only ever decrypted in memory on the target/at runtime.
+db_password: "{{ vault_db_password }}"

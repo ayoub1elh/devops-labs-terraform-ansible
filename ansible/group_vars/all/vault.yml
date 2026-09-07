@@ -1,0 +1,36 @@
+# =============================================================================
+# lab-15-ansible-vault — vault-encrypted group variables
+# =============================================================================
+#
+# WARNING: This file is a PLACEHOLDER, not real vault ciphertext.
+#
+# A real Ansible Vault file must begin with the line:
+#
+#     $ANSIBLE_VAULT;1.1;AES256
+#
+# followed by hex-encoded AES256 ciphertext blocks. Ansible refuses to
+# decrypt anything else. Since vault files must be created interactively,
+# you must generate this file yourself BEFORE running the playbook:
+#
+#     ansible-vault create ansible/group_vars/all/vault.yml
+#     # password: devops-labs   (or your own — keep it out of git!)
+#     # then enter YAML such as:
+#     #   vault_db_password: "s3cure-lab-password"
+#
+# In CI, the GitHub Secret ANSIBLE_VAULT_PASSWORD must match the password
+# you used above, otherwise decryption fails.
+#
+# The placeholder block below shows the FORMAT of a real vault file so you
+# know what a committed vault.yml looks like. Replace this whole file with
+# the output of `ansible-vault create` (or `ansible-vault encrypt`).
+# =============================================================================
+
+# PLACEHOLDER — replace this entire file with `ansible-vault create`:
+#
+# $ANSIBLE_VAULT;1.1;AES256
+# 6138646134626138366365663661356238666130323330363238646136636163
+# 6536643931633664363835326263633664366331666166376334386135303836
+# ... (many more hex lines; Ansible generates these — never hand-edit) ...
+
+# Do NOT commit the real vault.yml's password. See vault_password.example
+# and the top-level README for the recommended local password-file flow.

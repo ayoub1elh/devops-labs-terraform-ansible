@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# lab-15-ansible-vault — demonstration playbook
+#
+# Shows the two golden rules of working with vaulted secrets:
+#   1. Print secrets only behind no_log: true (and ideally never at all).
+#   2. Use secrets in real tasks (here: rendering a config file with
+#      restrictive permissions, mode 0600) instead of echoing them.
+#
+# Run locally (self-contained, no cloud resources):
+#   ansible-playbook ansible/site.yml --vault-password-file vault_password
+# or interactively:
+#   ansible-playbook ansible/site.yml --ask-vault-pass
+# =============================================================================
+
+- name: Demonstrate Ansible Vault secret handling on localhost
+  hosts: localhost
+  # Use the implicit localhost inventory entry so no inventory file is
+  # required; tasks execute directly on the CI runner / learner machine.
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # Rule 1: if you MUST inspect a secret, wrap it in no_log: true.
+    # Without no_log, the resolved password would appear in task output
+    # and CI logs — exactly what Vault is meant to prevent.
+    - name: Show the decrypted database password (hidden via no_log)
+      ansible.builtin.debug:
+        msg: "Decrypted db_password is: {{ db_password }}"
+      # no_log suppresses BOTH the task's stdout and the per-host result
+      # ("output has been hidden due to no_log") in logs.
+      no_log: true
+
+    # Rule 2: use the secret productively. Here we render a fake app
+    # config containing the password and lock it down to owner-only
+    # read/write (0600), the same permission discipline you'd apply to
+    # /etc/app/secrets.conf on a real host.
+    - name: Write fake app config containing the secret (mode 0600)
+      ansible.builtin.copy:
+        dest: "{{ app_config_path }}"
+        mode: "0600"
+        owner: "{{ ansible_user_id | default(lookup('ansible.builtin.env', 'USER')) }}"
+        content: |
+          # Managed by lab-15-ansible-vault — fake application config
+          app_name={{ app_name }}
+          db_password={{ db_password }}
+      # Also suppress logging here: the rendered content contains the
+      # secret, and Ansible logs file diffs/changed content by default.
+      no_log: true
+
+    # A benign verification task: proves the config was written WITHOUT
+    # ever printing its contents. We only show metadata.
+    - name: Verify the config file exists with correct permissions
+      ansible.builtin.stat:
+        path: "{{ app_config_path }}"
+      register: config_stat
+
+    - name: Report config file metadata (no secret content)
+      ansible.builtin.debug:
+        msg: >-
+          Config at {{ config_stat.stat.path }} exists={{ config_stat.stat.exists }},
+          mode={{ config_stat.stat.mode | default('n/a') }}
