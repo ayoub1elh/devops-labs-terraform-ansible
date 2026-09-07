@@ -1,42 +1,40 @@
-# ─── Terraform ────────────────────────────────────────────────────────────────
-# Local .terraform directories and lock files (per-branch/module)
-**/.terraform/*
-**/.terraform.lock.hcl
+# .gitignore for lab-12 (Molecule testing of the webserver role).
+# Covers Terraform artifacts (repo convention), Ansible artifacts,
+# Molecule test state, and Python/editor junk.
+
+# --- Terraform ---
+.terraform/
 *.tfstate
 *.tfstate.*
 crash.log
 crash.*.log
 *.tfvars
 !*.tfvars.example
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
+.terraform.lock.hcl
 .terraformrc
 terraform.rc
 
-# ─── Ansible ──────────────────────────────────────────────────────────────────
-*.retry                # ansible-playbook retry files
-.vault_pass            # never commit vault passwords
-*.vault_pass
+# --- Ansible ---
+*.retry
+.vault_pass
 ansible.log
 
-# ─── Molecule / tests ─────────────────────────────────────────────────────────
+# --- Molecule / test state ---
 .molecule/
-.pytest_cache/
-__pycache__/
-*.pyc
+**/.molecule/
 
-# ─── Python (molecule/ansible deps) ───────────────────────────────────────────
+# --- Python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
 .venv/
 venv/
+*.egg-info/
 
-# ─── Editors / OS ─────────────────────────────────────────────────────────────
+# --- Editors / OS ---
 .vscode/
 .idea/
 *.swp
+*~
 .DS_Store
 Thumbs.db
-
-# ─── Build staging area (used by repo maintainers) ────────────────────────────
-staging/
