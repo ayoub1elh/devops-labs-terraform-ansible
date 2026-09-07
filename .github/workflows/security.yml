@@ -1,0 +1,80 @@
+# ---------------------------------------------------------------------------
+# .github/workflows/security.yml — Static security scanning for Lab 07.
+#
+# Runs on every push and pull request. The four scan steps are intentionally
+# SEQUENTIAL (fmt -> tflint -> checkov -> tfsec) so the build log tells a
+# story: first "is the code well-formed", then "is it idiomatic", then "is
+# it secure". This workflow is pure STATIC analysis — it never runs
+# `terraform apply` and never needs AWS credentials, so no secrets or OIDC
+# are involved here.
+# ---------------------------------------------------------------------------
+name: security-scanning
+
+on:
+  push:
+    branches:
+      - lab-07-security-scanning
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Least-privilege: this job only needs to read the repository contents.
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Format, lint and security-scan Terraform
+    runs-on: ubuntu-latest
+
+    steps:
+      # --- Setup (tool installation; not counted among the 4 scan steps) ---
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.x"
+
+      - name: Set up tflint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: "v0.53.0"
+
+      # --- Scan step 1 of 4: formatting ------------------------------- #
+      # Fails the build if any .tf file is not `terraform fmt`-clean.
+      - name: 1 - terraform fmt -check -recursive
+        run: terraform fmt -check -recursive
+
+      # --- Scan step 2 of 4: tflint (init + run) ---------------------- #
+      # `init` downloads the AWS ruleset plugin, `run` lints the code.
+      - name: 2a - tflint init
+        run: tflint --init
+
+      - name: 2b - tflint run
+        run: tflint --format=compact --recursive
+
+      # --- Scan step 3 of 4: Checkov ---------------------------------- #
+      # Reads checkov-config.yml (which soft-fails) so findings are shown
+      # without breaking the build.
+      - name: 3 - checkov scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          config_file: checkov-config.yml
+          soft_fail: true # belt-and-suspenders: the config file also sets it
+
+      # --- Scan step 4 of 4: tfsec ------------------------------------ #
+      # Install the pinned tfsec binary, then scan. `--soft-fail` keeps the
+      # pipeline green while still printing every finding.
+      - name: 4a - Install tfsec
+        run: |
+          curl -sSLo tfsec.tar.gz https://github.com/aquasecurity/tfsec/releases/download/v1.28.10/tfsec_1.28.10_linux_amd64.tar.gz
+          tar -xzf tfsec.tar.gz tfsec
+          chmod +x tfsec
+          sudo mv tfsec /usr/local/bin/tfsec
+
+      - name: 4b - tfsec scan
+        run: tfsec --soft-fail .
